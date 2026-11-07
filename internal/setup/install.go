@@ -27,13 +27,17 @@ const Instructions = `## Secrets (secret-mask)
 Secrets in projects on this machine may be masked by secret-mask. Placeholders look like
 ` + "`__SECRET_MASK_<16 hex>__`" + `.
 
+- Start of a task: call the secret-mask MCP tool ` + "`next_steps`" + ` (or run ` + "`secret-mask check <project>`" + `).
+- Unmasked secrets (or a read BLOCKED by secret-mask): stop, do not read those files any other way, and ask the
+  user to run ` + "`secret-mask mask <project>`" + ` in their terminal. It needs their password: never ask for it or for
+  secret values. Continue only after they confirm and ` + "`next_steps`" + ` reports SAFE.
+- A finding that may be a local-dev or test value: call ` + "`review_findings`" + ` (lines with values redacted) and let the
+  user choose between masking it and allowlisting it themselves (.gitleaksignore / .gitleaks.toml); never do it yourself.
 - Keep every placeholder byte-for-byte, quoting included. Moving it together with its setting is fine;
   replacing, re-encoding or inventing one is not.
-- Before reading .env, config or credential files, call the secret-mask MCP tool ` + "`check_secrets`" + ` (or run
-  ` + "`secret-mask check <path>`" + `). If it reports unmasked secrets, stop and ask the user to run
-  ` + "`secret-mask mask <project>`" + ` in their terminal. It needs their password: never ask for it or for secret values.
-- If a read is BLOCKED by secret-mask, do not read the file another way; ask the user to mask it.
-- Never run ` + "`secret-mask mask`" + ` or ` + "`restore`" + ` yourself. Before finishing, ` + "`masking_status`" + ` must report missing: 0.
+- End of a task: ` + "`masking_status`" + ` must report missing: 0, then tell the user how to unseal:
+  ` + "`secret-mask restore <project>`" + ` (` + "`--dry-run`" + ` to preview, ` + "`--clean`" + ` to also delete the vault).
+- Never run ` + "`secret-mask mask`" + ` or ` + "`restore`" + ` yourself. ` + "`list_rules`" + ` shows the detection rules; ` + "`test_rule`" + `/` + "`add_rule`" + ` add one.
 `
 
 const (
@@ -649,4 +653,16 @@ func ownedFileEdit(kind, path string, content []byte, owned func([]byte) bool, f
 func (e *agentEnv) skillEdit(skillsDir string) edit {
 	owned := func(old []byte) bool { return bytes.Contains(old, []byte(skillMark)) }
 	return ownedFileEdit("skill", filepath.Join(skillsDir, ServerName, "SKILL.md"), []byte(Skill), owned, e.Force, true)
+}
+
+// ManagedBlock keeps body between the start and end marker lines of the text file at path, replacing an
+// earlier block in place or appending one; an empty body removes the block. It returns the status
+// ("created", "updated", "removed" or "unchanged").
+func ManagedBlock(path, start, end, body string) (string, error) {
+	ed := blockEdit("block", path, start, end, body, nil)
+	fn := ed.install
+	if body == "" {
+		fn = ed.remove
+	}
+	return (&agentEnv{}).apply(ed, fn)
 }

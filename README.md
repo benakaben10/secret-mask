@@ -2,15 +2,17 @@
 
 Mask the secrets in a project before AI agents (or anyone) see it, and restore them exactly afterwards.
 
-- **Detects** secrets with [gitleaks](https://github.com/gitleaks/gitleaks), embedded as a library: one
-  static binary, no external tools. Your `.gitleaks.toml` and `.gitleaksignore` are honored.
+- **Detects** secrets with [gitleaks](https://github.com/gitleaks/gitleaks), embedded as a library (one
+  static binary, no external tools), plus strict rules for passwords people choose themselves. Your
+  `.gitleaks.toml` and `.gitleaksignore` are honored.
 - **Masks** every occurrence with a stable placeholder such as `__SECRET_MASK_8656926daa6d6f8c__`; the same
   value gets the same placeholder everywhere.
 - **Encrypts** the originals into `.secret-mask.vault` with your password (AES-256-GCM, PBKDF2-SHA256 600k).
 - **Restores** byte-for-byte, even if placeholders were moved to other files, while keeping other edits.
 - **Guards AI agents** (Claude Code, Codex, Gemini CLI, Cursor, VS Code / Copilot): `secret-mask install` adds
-  a hook that blocks reading files that still contain unmasked secrets, an MCP server with read-only checks,
-  and a skill telling them never to alter placeholders.
+  a hook that blocks reading files that still contain unmasked secrets, an MCP server that tells the agent what
+  to ask you (mask first, unseal at the end) and lets it read and add detection rules, and a skill with the rules.
+- **Guards commits**: `secret-mask protect` adds a git pre-commit hook that refuses, or masks, staged secrets.
 
 ## Install
 
@@ -22,7 +24,25 @@ curl -fsSL https://raw.githubusercontent.com/benakaben10/secret-mask/master/inst
 ```
 
 Options (after `sh -s --`): `--dir PATH`, `--version vX.Y.Z`, `--clients claude,codex`, `--no-hooks`,
-`--skip-config` (binary only). Re-running it updates the binary and the agent configuration.
+`--skip-config` (binary only).
+
+**Upgrade**: run the same line again. An existing `secret-mask` on `PATH` is replaced in place (agent configs
+and git hooks call it by that path), the old and new versions are printed, and the agent configuration is
+refreshed (new skill text, hook commands). `secret-mask upgrade` prints the exact command for the current
+installation (`--version vX.Y.Z` to pin one); the binary itself never downloads anything. Other installs:
+`go install …@latest`, `docker pull …:latest`, and for the plugin
+`claude plugin marketplace update secret-mask && claude plugin update secret-mask@secret-mask`.
+
+**Shell completion** (bash, zsh): commands, flags, agents for `--clients`, modes, rule sources, paths.
+
+```sh
+secret-mask completion --install          # for $SHELL; or: --install bash | --install zsh
+secret-mask completion --uninstall zsh    # take it out again
+eval "$(secret-mask completion zsh)"      # or load it yourself (zsh: after compinit)
+```
+
+`--install` adds a marked block to `~/.bashrc` or `~/.zshrc` that loads the script from this executable, so it
+follows upgrades.
 
 **Binary** — download `secret-mask_<os>_<arch>` from the
 [latest release](https://github.com/benakaben10/secret-mask/releases/latest), check it against `SHA256SUMS`,
@@ -47,6 +67,8 @@ secret-mask status .        # every placeholder still present? (no password)
 secret-mask restore .       # put the real values back
 secret-mask restore --clean .   # ...and delete the vault and guide
 secret-mask protect .       # git pre-commit hook: no commit with unmasked secrets
+secret-mask rules .         # the detection rules in use
+secret-mask upgrade         # how to upgrade to a new release
 ```
 
 Step-by-step scenarios (sharing with an AI agent, CI, commits, recovery…): [demo/USE_CASES.md](demo/USE_CASES.md).
@@ -98,6 +120,133 @@ committed, not the work tree):
 - Any error (no password, scan failure, `secret-mask` not found) blocks the commit. `git commit --no-verify`
   skips the hook.
 
+## Detection rules
+
+```sh
+secret-mask rules .                           # every rule in use, with its source
+secret-mask rules --source secret-mask .      # gitleaks | secret-mask | project
+secret-mask rules --id aws-access-token .     # one rule in full (regex, keywords, allowlists)
+secret-mask rules --json .                    # everything, including the global allowlists
+```
+
+Every scan (`check`, `mask`, the agent hooks, the MCP server, `pre-commit`) uses the same rules:
+
+1. **gitleaks' built-in rules** (222 in gitleaks v8.30.1, compiled into the binary; source:
+   [config/gitleaks.toml](https://github.com/gitleaks/gitleaks/blob/v8.30.1/config/gitleaks.toml)). They find
+   provider tokens (AWS, GitHub, Slack, OpenAI, Stripe, private keys, JWTs…) and, with `generic-api-key`,
+   random-looking values assigned to `key`/`token`/`secret`/`password` names.
+2. **secret-mask's password rules** ([internal/detect/rules.toml](internal/detect/rules.toml)). They catch
+   passwords people choose themselves (`Admin@123`, `hunter22`), which have too little entropy for gitleaks.
+   They are strict on purpose (a value in `.env.example` is caught too); only obvious non-values are skipped:
+   `$VAR`, `${VAR}`, `$(cmd)`, `{{ template }}`, `<placeholder>`, `***`, `xxxx`, `true`/`null`, the bare word
+   `password`.
+
+   | Rule id | Finds |
+   |---|---|
+   | `secret-mask-password-quoted` | `password = "…"`, `"db_password": "…"`, `--password='…'` in any file |
+   | `secret-mask-password-unquoted` | `DB_PASSWORD=…`, `password: …`, `export PGPASSWORD=…` in config files (`.env*`, `*.yaml`, `*.ini`, `*.properties`, `*.toml`, `*.conf`, shell scripts, Dockerfiles, compose files…) |
+   | `secret-mask-url-password` | the password of `scheme://user:password@host` (only that part is masked) |
+   | `secret-mask-connection-string-password` | `Server=…;User Id=…;Password=…;` |
+   | `secret-mask-xml-password` | `<password>…</password>`, `<db.password>…</db.password>` |
+
+3. **The project's rules**: the first of `--config FILE`, `$GITLEAKS_CONFIG`, `<project>/.gitleaks.toml`.
+
+A project config with `[extend] useDefault = true` keeps the gitleaks rules; without it, only its own rules
+and secret-mask's run. secret-mask's rules are always added unless the config defines a rule with the same id
+(which replaces it) or lists the id in `[extend] disabledRules`.
+
+### Writing a rule
+
+Add it to `.gitleaks.toml` in the project root:
+
+```toml
+[extend]
+useDefault = true                      # keep the built-in rules
+disabledRules = ["generic-api-key"]    # optional: turn off a noisy rule
+
+# An in-house token: the whole match is the secret.
+[[rules]]
+id = "acme-internal-token"
+description = "ACME internal service token"
+regex = '''\b(acme_[a-z]{2}_[A-Za-z0-9]{24})\b'''
+keywords = ["acme_"]
+
+# A password inside a DSN: only capture group 1 is the secret (and gets masked).
+[[rules]]
+id = "acme-db-password"
+regex = '''postgres://[^:\s]+:([^@\s]{8,})@'''
+secretGroup = 1
+keywords = ["postgres://"]
+[[rules.allowlists]]
+regexes = ['''^changeme''']            # values of this rule to ignore
+```
+
+| Field | Meaning |
+|---|---|
+| `id` | name shown in findings and used in `.gitleaksignore` |
+| `regex` | Go RE2 syntax (no lookahead/lookbehind) |
+| `secretGroup` | capture group that holds the secret. Unset: the first non-empty group, else the whole match |
+| `keywords` | lowercase strings; the regex only runs on files containing one of them (speed) |
+| `entropy` | minimum Shannon entropy of the secret: 3–4 filters out words, 0 (unset) keeps self-chosen passwords |
+| `path` | only files whose project-relative path (`config/app.yaml`, forward slashes) matches |
+| `[[rules.allowlists]]` | exceptions for this rule: `regexes` (on the secret, or `regexTarget = "match"` / `"line"`), `paths`, `stopwords` |
+
+What secret-mask adds to the gitleaks rules: **the capture group decides what is replaced by a placeholder**.
+A regex that matches `password=...` without a group would replace the whole `password=...` and break the
+file; always put the value in a group.
+
+Try it before relying on it:
+
+```sh
+secret-mask rules --id acme-db-password .   # loaded as expected?
+secret-mask check .                          # finds what it should (exit 4), nothing else?
+secret-mask mask --dry-run .                 # what would be masked
+```
+
+Agents do the same through MCP: `list_rules` / `get_rule` read every rule, `test_rule` runs a draft on a
+sample (and, with `scan_project`, reports project locations without values), `add_rule` appends it to
+`.gitleaks.toml`. `add_rule` only adds new ids: it cannot replace, disable or allowlist an existing rule.
+
+### Local development: allowlists
+
+A value that only works on the developer's machine (a local Docker database, a test fixture, an example file)
+need not be masked. Allowlist it, in the narrowest way that fits:
+
+| Need | Where | Example |
+|---|---|---|
+| One finding | `.gitleaksignore` (project root) | `docker-compose.dev.yml:secret-mask-password-unquoted:4` |
+| Whole dev/test files | `[[allowlists]] paths` in `.gitleaks.toml` | `'''^docker-compose\.dev\.yml$'''`, `'''^test/fixtures/'''` |
+| Local URLs of one rule | `targetRules` + `regexTarget = "line"` | `'''@(?:localhost\|127\.0\.0\.1\|db)[:/]'''` |
+| Known dev values | `stopwords` | `["devpass", "localdev"]` |
+
+```toml
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "local dev and test files"
+paths = ['''^docker-compose\.dev\.yml$''', '''^test/fixtures/''']
+
+[[allowlists]]
+description = "local dev database"
+targetRules = ["secret-mask-url-password"]
+regexTarget = "line"
+regexes = ['''@(?:localhost|127\.0\.0\.1|db)[:/]''']
+
+[[allowlists]]
+description = "shared dev passwords"
+stopwords = ["localdev"]
+```
+
+- `.gitleaksignore` lines are `file:rule:line` (the output of `secret-mask check`). They stop matching when
+  the line moves; add them again then.
+- Paths are matched against the project-relative path, so `^test/` means the project's own `test/` folder.
+- An allowlisted value is never masked: agents can read it and it can be committed. Never allowlist a value
+  that works anywhere but your machine (shared dev servers included).
+- Agents tell the two apart with the MCP tool `review_findings`: each finding with its line, the value
+  replaced by «redacted», a hint (real credential vs. local-dev/test value) and these allowlist lines ready to
+  copy. The decision and the edit stay with you.
+
 ## AI agents
 
 ```sh
@@ -124,11 +273,27 @@ kept, re-running is a no-op, `uninstall` removes only what secret-mask wrote):
   (it needs their password). Any error also denies (fail closed). Shell commands are read best-effort: files
   named in the command, globs, and the directory of recursive searches (`rg`, `grep -r`) are checked;
   variables and generated paths are not. Codex users trust the new hook once with `/hooks`.
-- **MCP server** (`secret-mask mcp`): read-only tools `check_secrets`, `masking_status`, `masking_guide`.
-  There is deliberately no mask/restore tool: those need the password and stay with the user. Tool results
-  never include secret values.
-- **Skill and instructions** tell the agent to keep placeholders byte-for-byte, check before reading
-  config files and leave masking to the user. A skill file you wrote yourself is never overwritten
+- **MCP server** (`secret-mask mcp`). There is deliberately no mask/restore tool: those need the password and
+  stay with the user. Tool results never include secret values from project files.
+
+  | Tool | What the agent gets |
+  |---|---|
+  | `next_steps` | where the project stands and the exact commands to give the user: mask before any work, restore ("unseal") at the end |
+  | `check_secrets` | unmasked secrets in a file or directory (rule ids and locations) |
+  | `review_findings` | each finding's line with the value «redacted», a hint (real credential vs. local-dev/test value) and the allowlist lines the user can add |
+  | `masking_status` | every placeholder still present? (`missing` must be 0 before finishing) |
+  | `masking_guide` | the rules for editing a masked project |
+  | `list_rules`, `get_rule` | every detection rule in use, in full |
+  | `test_rule` | a draft rule run on a sample, and on the project (locations only) |
+  | `add_rule` | appends a new rule to `.gitleaks.toml` (the only tool that writes; cannot change existing rules) |
+
+- **Workflow the agent follows** (skill, instructions, hook message): at the start of a task it calls
+  `next_steps`. Unmasked secrets: it stops and asks you to run `secret-mask mask <project>` (your password, which
+  it never sees), and continues only after you confirm and the check passes. A finding that may be a dev value:
+  it shows you `review_findings` and you choose between masking and allowlisting. At the end it checks
+  `masking_status` and tells you how to unseal: `secret-mask restore <project>` (`--dry-run` to preview,
+  `--clean` to drop the vault).
+- **Skill and instructions** carry that workflow and the placeholder rules. A skill file you wrote yourself is never overwritten
   (`--force` replaces it).
 - The configs call this executable by its absolute path; `--command "docker run --rm -i IMAGE"` writes another
   command. JSON files with comments (JSONC) are reported and must be edited by hand.
@@ -152,6 +317,9 @@ Report vulnerabilities privately, see [SECURITY.md](SECURITY.md).
 - The vault keeps a plaintext manifest (placeholder ids, rule ids, file paths — no values) so `status` works
   without the password; it is authenticated, so editing it makes the vault fail to open.
 - Committing the vault is up to you: it is encrypted, but its strength is your password's.
+- Agents cannot change detection through MCP except by adding rules. An agent with a file-editing tool could
+  still edit `.gitleaks.toml` or `.gitleaksignore`; the skill forbids it, and reviewing changes to those files
+  is worth a rule in your code review.
 - Masking rewrites files atomically and preserves their permissions. Binary files and symlinks are skipped;
   a secret that gitleaks found only after decoding (e.g. base64) is reported as skipped.
 
@@ -167,7 +335,7 @@ make scan       # Trivy scan of the image
 ```
 
 Layout: `cmd/secret-mask` (entrypoint), `internal/` — `cli` (commands), `detect` (embedded gitleaks), `mask`
-(placeholders, mask/restore), `vault` (encryption), `guide` (AI rules), `hook` (agent hooks), `mcp`
+(placeholders, mask/restore; `detect/rules.toml` holds the password rules), `vault` (encryption), `guide` (AI rules), `hook` (agent hooks), `mcp`
 (stdio MCP server), `setup` (agent config: `install`/`uninstall`, skill in `setup/skill`), `gitrepo` (staged
 content, pre-commit hook), `fsutil`, `version`.
 `plugin/` is the Claude Code plugin (its `SKILL.md` must equal `internal/setup/skill/SKILL.md`; a test checks).

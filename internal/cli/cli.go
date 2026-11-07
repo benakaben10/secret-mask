@@ -49,6 +49,7 @@ Usage:
   secret-mask install   [flags]        set up every detected coding agent (Claude Code, Codex, Gemini, Cursor,
                                        VS Code, Copilot CLI): MCP server, read-blocking hook, skill, instructions
   secret-mask uninstall [flags]        remove what install wrote
+  secret-mask rules   [flags] [dir]    list the detection rules in use (--id ID for one rule in full, --json)
   secret-mask protect [flags] [dir]    install a git pre-commit hook in the repository containing dir:
                                        --mode block (default) refuses commits with unmasked secrets,
                                        --mode mask masks them and re-stages; --remove uninstalls it
@@ -56,6 +57,9 @@ Usage:
   secret-mask setup   [flags] [dir]    install the Claude Code read hook and MCP server for one project
   secret-mask hook    [--client C]     agent pre-tool hook (reads the hook JSON on stdin)
   secret-mask mcp     [flags]          MCP server on stdio (read-only tools)
+  secret-mask upgrade [--version TAG]  how to upgrade this installation to a new release
+  secret-mask completion [bash|zsh]    print the shell completion script; --install adds it to ~/.bashrc or
+                                       ~/.zshrc, --uninstall removes it
   secret-mask version
 
 Password: --ask prompts on the terminal; otherwise it is read from $%s (or the variable named by
@@ -101,6 +105,12 @@ func (a *App) Run(args []string) int {
 		err = a.install(args[1:], true)
 	case "uninstall":
 		err = a.install(args[1:], false)
+	case "rules":
+		err = a.rules(args[1:])
+	case "upgrade":
+		err = a.upgrade(args[1:])
+	case "completion":
+		err = a.completion(args[1:])
 	case "protect":
 		err = a.protect(args[1:])
 	case "pre-commit":

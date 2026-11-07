@@ -17,14 +17,14 @@ binaries: ## static binaries + SHA256SUMS in dist/
 	docker build --target binaries --build-arg VERSION=$(VERSION) -o dist .
 
 e2e: image binaries ## end-to-end tests against the release binary and the image
-	docker run --rm -v "$(CURDIR)/test/e2e:/e2e:ro" -v "$(CURDIR)/dist:/dist:ro" alpine:3.24.3 \
-		sh -c 'apk add --no-cache git >/dev/null && sh /e2e/e2e.sh /dist/secret-mask_linux_$(ARCH)'
+	docker run --rm -v "$(CURDIR)/test/e2e:/e2e:ro" -v "$(CURDIR)/install.sh:/installer/install.sh:ro" -v "$(CURDIR)/dist:/dist:ro" \
+		-e SECRET_MASK_INSTALLER=/installer/install.sh alpine:3.24.3 sh -c 'apk add --no-cache git curl busybox-extras bash zsh >/dev/null && sh /e2e/e2e.sh /dist/secret-mask_linux_$(ARCH)'
 	docker run --rm --entrypoint sh -v "$(CURDIR)/test/e2e:/e2e:ro" $(IMAGE) \
 		/e2e/e2e.sh /usr/local/bin/secret-mask
 
-demo: image ## guided demo inside the image
-	docker run --rm -t --entrypoint sh -v "$(CURDIR)/demo:/demo:ro" $(IMAGE) \
-		/demo/demo.sh /usr/local/bin/secret-mask /tmp/demo
+demo: binaries ## guided demo of every feature (release binary, in a container with git)
+	docker run --rm -t -v "$(CURDIR)/demo:/demo:ro" -v "$(CURDIR)/dist:/dist:ro" alpine:3.24.3 \
+		sh -c 'apk add --no-cache git >/dev/null && sh /demo/demo.sh /dist/secret-mask_linux_$(ARCH) /tmp/demo'
 
 scan: image ## Trivy scan of the image
 	docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.76.2 image \

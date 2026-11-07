@@ -285,8 +285,10 @@ func blockMessage(root string, findings []detect.Finding) string {
 	for _, file := range slices.Sorted(maps.Keys(perFile)) {
 		fmt.Fprintf(&b, "  %s: %s\n", file, strings.Join(perFile[file], ", "))
 	}
-	fmt.Fprintf(&b, "Stop and ask the user to run this themselves in a terminal (it needs their password), then retry:\n")
+	fmt.Fprintf(&b, "Stop the task and ask the user to run this themselves in a terminal (it needs their password), then retry:\n")
 	fmt.Fprintf(&b, "  secret-mask mask %s\n", root)
+	b.WriteString("Continue only after the user confirms. When the work is done, tell them the real values come back with:\n")
+	fmt.Fprintf(&b, "  secret-mask restore %s\n", root)
 	b.WriteString("Do not try to read these files another way (cat, grep, editors) and do not ask the user to paste secrets.")
 	return b.String()
 }

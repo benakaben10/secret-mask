@@ -102,22 +102,22 @@ const extraRule = `
 useDefault = true
 
 [[rules]]
-id = "custom-password"
-regex = '''PASSWORD=(\S{6,})'''
+id = "custom-ticket"
+regex = '''TICKET=(TK-\d{6,})'''
 secretGroup = 1
-keywords = ["password"]
+keywords = ["ticket"]
 `
 
 func TestScanRepoConfigAndIgnore(t *testing.T) {
 	dir := tree(t, map[string]string{
 		".gitleaks.toml": extraRule,
-		".env":           "PASSWORD=Admin@123\nAWS_ACCESS_KEY_ID=" + awsKey + "\n",
+		".env":           "TICKET=TK-123456\nAWS_ACCESS_KEY_ID=" + awsKey + "\n",
 	})
 	got, err := Scan(context.Background(), Options{Root: dir})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(secrets(got), []string{".env=" + awsKey, ".env=Admin@123"}) {
+	if !reflect.DeepEqual(secrets(got), []string{".env=" + awsKey, ".env=TK-123456"}) {
 		t.Fatalf("repo config not used: %v", secrets(got))
 	}
 
@@ -133,19 +133,19 @@ func TestScanRepoConfigAndIgnore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(secrets(got), []string{".env=Admin@123"}) {
+	if !reflect.DeepEqual(secrets(got), []string{".env=TK-123456"}) {
 		t.Errorf("with .gitleaksignore: %v", secrets(got))
 	}
 }
 
 func TestScanConfigPrecedence(t *testing.T) {
-	dir := tree(t, map[string]string{".env": "PASSWORD=Admin@123\n"})
+	dir := tree(t, map[string]string{".env": "TICKET=TK-123456\n"})
 	cfg := filepath.Join(t.TempDir(), "leak.toml")
 	os.WriteFile(cfg, []byte(extraRule), 0o644)
 
 	got, _ := Scan(context.Background(), Options{Root: dir})
 	if len(got) != 0 {
-		t.Errorf("default rules should not flag a short password: %v", secrets(got))
+		t.Errorf("default rules should not know the custom format: %v", secrets(got))
 	}
 	got, err := Scan(context.Background(), Options{Root: dir, Config: cfg})
 	if err != nil || len(got) != 1 {
@@ -232,5 +232,149 @@ func TestLoadReportErrors(t *testing.T) {
 	os.WriteFile(bad, []byte("not json"), 0o600)
 	if _, err := LoadReport(bad, "."); err == nil || !strings.Contains(err.Error(), "parse gitleaks report") {
 		t.Errorf("bad json: err = %v", err)
+	}
+}
+
+func TestBuiltinPasswordRules(t *testing.T) {
+	caught := map[string]string{
+		".env":                      "DB_PASSWORD=Admin@123\n",
+		".env.example":              "export PGPASSWORD=hunter22\n",
+		"config/app.yaml":           "db:\n  password: P@ssw0rd!\n",
+		"config/app.json":           `{"db": {"password": "Winter2024!"}}`,
+		"src/settings.py":           `DATABASE_PASSWORD = 'S3cret-Pass'`,
+		"src/main.go":               "conn := Connect(\"postgres://app:Dbpass-77@db:5432/app\")\n",
+		"appsettings.json":          `{"Db": "Server=sql1;User Id=sa;Password=Sql@dmin1;"}`,
+		"conf/server.xml":           "<db.password>XmlPass99</db.password>\n",
+		"deploy/run.sh":             "mysql --password='Mysql#2024' app\n",
+		"settings/local.properties": "spring.datasource.password=Spring!Pw1\n",
+	}
+	want := map[string]string{
+		".env": "Admin@123", ".env.example": "hunter22", "config/app.yaml": "P@ssw0rd!", "config/app.json": "Winter2024!",
+		"src/settings.py": "S3cret-Pass", "src/main.go": "Dbpass-77", "appsettings.json": "Sql@dmin1",
+		"conf/server.xml": "XmlPass99", "deploy/run.sh": "Mysql#2024", "settings/local.properties": "Spring!Pw1",
+	}
+	got, err := Scan(context.Background(), Options{Root: tree(t, caught)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := map[string]bool{}
+	for _, f := range got {
+		if want[f.File] == f.Secret {
+			found[f.File] = true
+		}
+	}
+	for file, secret := range want {
+		if !found[file] {
+			t.Errorf("%s: %q not found; got %v", file, secret, secrets(got))
+		}
+	}
+
+	ignored := map[string]string{
+		".env":             "DB_PASSWORD=${DB_PASSWORD}\nADMIN_PASSWORD=\nPGPASSWORD=$(cat /run/secret)\nPWD=/home/app\n",
+		"config/app.yaml":  "password: <your-password>\npassword_hash: ''\npassword:\n  min_length: 8\n",
+		"src/form.ts":      `const label = "Enter your password"; if (password === confirm) {}; const passwordInput = getPassword();`,
+		"src/main.go":      "password := os.Getenv(\"DB_PASSWORD\")\nurl := \"https://example.com/path\"\n",
+		"src/handler.py":   "password = request.form['password']\n",
+		"templates/a.tmpl": `password: "{{ .Values.password }}"`,
+		"i18n/en.json":     `{"password": "Password", "passwordHint": "At least 8 characters"}`,
+	}
+	got, err = Scan(context.Background(), Options{Root: tree(t, ignored)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Errorf("placeholders and code flagged: %v", secrets(got))
+	}
+}
+
+func TestBuiltinRulesCanBeDisabledOrOverridden(t *testing.T) {
+	files := map[string]string{".env": "DB_PASSWORD=Admin@123\n"}
+	dir := tree(t, files)
+	os.WriteFile(filepath.Join(dir, ".gitleaks.toml"), []byte("[extend]\nuseDefault = true\ndisabledRules = [\"secret-mask-password-unquoted\"]\n"), 0o644)
+	if got, _ := Scan(context.Background(), Options{Root: dir}); len(got) != 0 {
+		t.Errorf("disabled rule still reports: %v", secrets(got))
+	}
+	// A rule with the same id in the project config replaces the built-in one.
+	os.WriteFile(filepath.Join(dir, ".gitleaks.toml"), []byte(`[[rules]]
+id = "secret-mask-password-unquoted"
+regex = '''NEVER_MATCHES_(\w+)'''
+`), 0o644)
+	if got, _ := Scan(context.Background(), Options{Root: dir}); len(got) != 0 {
+		t.Errorf("overridden rule still reports: %v", secrets(got))
+	}
+}
+
+func TestPathPatternsAreRootRelative(t *testing.T) {
+	// The project lives under a directory named "fixtures": an unanchored path allowlist must not hide it,
+	// and an anchored one must apply.
+	parent := t.TempDir()
+	dir := filepath.Join(parent, "fixtures", "app")
+	os.MkdirAll(filepath.Join(dir, "test"), 0o755)
+	os.WriteFile(filepath.Join(dir, ".env"), []byte("AWS_ACCESS_KEY_ID="+awsKey+"\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, "test", "fake.env"), []byte("AWS_ACCESS_KEY_ID="+awsKey+"\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, ".gitleaks.toml"), []byte(`[extend]
+useDefault = true
+[[allowlists]]
+paths = ['''^test/''', '''(?:^|/)fixtures/''']
+`), 0o644)
+	got, err := Scan(context.Background(), Options{Root: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(secrets(got), []string{".env=" + awsKey}) {
+		t.Errorf("findings = %v", secrets(got))
+	}
+}
+
+// gitleaks keeps a global [extend] depth; a long-running process (MCP server) loads configs many times.
+func TestExtendDefaultSurvivesRepeatedLoads(t *testing.T) {
+	dir := tree(t, map[string]string{
+		".gitleaks.toml": "[extend]\nuseDefault = true\n",
+		".env":           "AWS_ACCESS_KEY_ID=" + awsKey + "\n",
+	})
+	for i := range 5 {
+		got, err := Scan(context.Background(), Options{Root: dir})
+		if err != nil || len(got) != 1 {
+			t.Fatalf("load %d: %v %v", i+1, secrets(got), err)
+		}
+	}
+}
+
+// The allowlists documented for local development (README, review_findings) must work as written.
+const devAllowlists = `[extend]
+useDefault = true
+
+[[allowlists]]
+description = "local dev and test files"
+paths = ['''^docker-compose\.dev\.yml$''', '''^test/fixtures/''']
+
+[[allowlists]]
+description = "local dev database"
+targetRules = ["secret-mask-url-password"]
+regexTarget = "line"
+regexes = ['''@(?:localhost|127\.0\.0\.1|db)[:/]''']
+
+[[allowlists]]
+description = "shared dev passwords"
+stopwords = ["localdev"]
+`
+
+func TestDevAllowlists(t *testing.T) {
+	files := map[string]string{
+		".env":                   "DATABASE_URL=postgres://app:Devpass-123@localhost:5432/app\nPROD_DB_PASSWORD=Pr0d-S3cret!\nLOCAL_ADMIN_PASSWORD=localdev-admin1\nREMOTE_URL=postgres://app:Remote-Pw1@db.prod.example:5432/app\n",
+		"test/fixtures/db.env":   "DB_PASSWORD=Fixture-Pass1\n",
+		"docker-compose.dev.yml": "services:\n  db:\n    environment:\n      POSTGRES_PASSWORD: Compose-Pass9\n",
+	}
+	dir := tree(t, files)
+	if got, _ := Scan(context.Background(), Options{Root: dir}); len(got) != 6 {
+		t.Fatalf("without allowlists: %v", secrets(got))
+	}
+	os.WriteFile(filepath.Join(dir, ".gitleaks.toml"), []byte(devAllowlists), 0o644)
+	got, err := Scan(context.Background(), Options{Root: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(secrets(got), []string{".env=Pr0d-S3cret!", ".env=Remote-Pw1"}) {
+		t.Errorf("with dev allowlists: %v", secrets(got))
 	}
 }

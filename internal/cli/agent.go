@@ -48,9 +48,14 @@ func (a *App) hook(ctx context.Context, args []string) error {
 	return nil
 }
 
-const mcpInstructions = `secret-mask protects secrets in this project. Before reading config files, call check_secrets.
-If it reports unmasked secrets, stop and ask the user to run "secret-mask mask" themselves (it needs
-their password). Never change __SECRET_MASK_<16 hex>__ placeholders; see masking_guide.`
+const mcpInstructions = `secret-mask protects secrets in this project. Call next_steps at the start of a task: if it reports
+unmasked secrets, stop, give the user the mask command it prints (it needs their password, which you never
+see) and continue only once next_steps reports SAFE. When the task is done, check masking_status (missing: 0)
+and give the user the restore ("unseal") commands next_steps prints. When a finding may be a local-dev or test
+value rather than a real credential, call review_findings and let the user choose: mask, or allowlist it
+themselves. Never change __SECRET_MASK_<16 hex>__ placeholders; see masking_guide.
+list_rules and get_rule show every detection rule in use; to detect a new kind of secret, try it with
+test_rule, then add it with add_rule (the only tool that writes: it appends a rule to .gitleaks.toml).`
 
 func (a *App) mcp(ctx context.Context, args []string) error {
 	fs := a.flagSet("mcp")
@@ -129,6 +134,32 @@ func (a *App) mcp(ctx context.Context, args []string) error {
 			},
 		},
 	}
+	srv.Tools = append(srv.Tools, mcp.Tool{
+		Name: "next_steps",
+		Description: "Where the project stands (unmasked secrets, masked, placeholders missing) and the exact commands to give " +
+			"the user: mask before any work, restore (\"unseal\") when the work is done. Call it at the start of a task, " +
+			"whenever a read is BLOCKED by secret-mask, and before finishing.",
+		InputSchema: map[string]any{"type": "object", "properties": map[string]any{}},
+		Handler: func(ctx context.Context, raw json.RawMessage) (string, error) {
+			return nextSteps(ctx, root, *config)
+		},
+	})
+	srv.Tools = append(srv.Tools, mcp.Tool{
+		Name: "review_findings",
+		Description: "For each unmasked secret: file, line, rule, the line with the value replaced by «redacted», a hint whether it " +
+			"looks like a real credential or a local-dev/test value, and the exact allowlist the USER can add instead of " +
+			"masking (.gitleaksignore entry, path, line or stopword allowlists). Use it to help the user decide; never " +
+			"allowlist anything yourself.",
+		InputSchema: pathSchema("file or directory to review, relative to the project root (default: the whole project)"),
+		Handler: func(ctx context.Context, raw json.RawMessage) (string, error) {
+			p, err := inRoot(root, raw)
+			if err != nil {
+				return "", err
+			}
+			return reviewFindings(ctx, root, *config, p)
+		},
+	})
+	srv.Tools = append(srv.Tools, a.ruleTools(root, *config)...)
 	return srv.Serve(ctx, a.Stdin, a.Stdout)
 }
 

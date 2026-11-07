@@ -348,3 +348,15 @@ func TestPluginSkillMatches(t *testing.T) {
 		t.Error("plugin/skills/secret-mask/SKILL.md differs from internal/setup/skill/SKILL.md; copy it")
 	}
 }
+
+func TestUpgradeRefreshesOwnedFiles(t *testing.T) {
+	home := t.TempDir()
+	skill := filepath.Join(home, ".claude", "skills", "secret-mask", "SKILL.md")
+	os.MkdirAll(filepath.Dir(skill), 0o755)
+	// What an older release wrote: still marked as managed, different text.
+	os.WriteFile(skill, []byte("---\nname: secret-mask\n---\n<!-- "+skillMark+" -->\nold rules\n"), 0o644)
+	st := statuses(mustInstall(t, opts(home, "claude")))
+	if st["skill "+skill] != "updated" || readText(t, skill) != Skill {
+		t.Errorf("old skill not refreshed: %v", st)
+	}
+}

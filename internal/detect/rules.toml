@@ -1,0 +1,78 @@
+# secret-mask's own rules, added to every config (built-in or project) unless the config defines a rule
+# with the same id or lists it in [extend] disabledRules.
+#
+# They catch passwords people choose themselves (Admin@123, hunter2…): these have too little entropy for the
+# gitleaks rules, which look for random tokens. They are strict on purpose: a sample value in .env.example is
+# masked too. Only obvious non-values are skipped: variable references, templates, <placeholders>, ***.
+#
+# Paths are matched relative to the project root, with forward slashes.
+
+# Shared skip list for password values (kept identical in every rule below).
+# - $VAR ${VAR} $(cmd) %VAR% {{ tpl }} <placeholder> ***** xxxx ....
+# - true/false/null/none/nil/undefined, and the bare words password/passwd/pass
+
+[[rules]]
+id = "secret-mask-password-quoted"
+description = "Password set as a quoted string, in any file: password = \"…\", \"db_password\": \"…\", --password='…'."
+regex = '''(?i)(?:^|[\s"'`{(,;])(?:export[ \t]+)?["']?[\w.-]{0,40}?(?:passw(?:or)?d|passphrase|[_.-]pwd|pwd[_.-]|[_.-]pass|pass[_.-])[\w.-]{0,20}["']?[ \t]*(?::=|=>|=|:)[ \t]*(?:"([^"\r\n]{4,128})"|'([^'\r\n]{4,128})'|`([^`\r\n]{4,128})`)'''
+keywords = ["passw", "passphrase", "pwd", "pass"]
+tags = ["password", "secret-mask"]
+[[rules.allowlists]]
+regexes = [
+  '''^(?:\$\{?[\w.:-]*\}?|\$\(.*|%[\w.]+%|\{\{.*\}\}|<[^<>]*>|\*+|x{3,}|X{3,}|\.{3,}|-+)$''',
+  '''^(?i:true|false|null|none|nil|undefined|password|passwd|pass)$''',
+  '''\s''',
+]
+
+[[rules]]
+id = "secret-mask-password-unquoted"
+description = "Password set without quotes in a config file: DB_PASSWORD=…, password: …, export PGPASSWORD=…."
+regex = '''(?i)(?:^|[\s;])(?:export[ \t]+)?[\w.-]{0,40}?(?:passw(?:or)?d|passphrase|[_.-]pwd|pwd[_.-]|[_.-]pass|pass[_.-])[\w.-]{0,20}[ \t]*(?::=|=|:)[ \t]*([^\s"'`#;,]{4,128})'''
+path = '''(?i)(?:^|/)(?:\.env(?:\.[\w.-]+)?|[\w.-]*\.(?:env|ini|cfg|conf|config|properties|toml|ya?ml|tfvars|envrc|npmrc|pypirc|netrc|sh|bash|zsh)|Dockerfile[\w.-]*|docker-compose[\w.-]*)$'''
+keywords = ["passw", "passphrase", "pwd", "pass"]
+tags = ["password", "secret-mask"]
+[[rules.allowlists]]
+regexes = [
+  '''^(?:\$\{?[\w.:-]*\}?|\$\(.*|%[\w.]+%|\{\{.*\}\}|<[^<>]*>|\*+|x{3,}|X{3,}|\.{3,}|-+)$''',
+  '''^(?i:true|false|null|none|nil|undefined|password|passwd|pass)$''',
+  '''^[|>][-+]?$''',
+]
+
+[[rules]]
+id = "secret-mask-url-password"
+description = "Password in a URL or DSN: postgres://user:…@host, https://user:…@host."
+regex = '''(?i)\b[a-z][a-z0-9+.-]{1,20}://[^:/@\s"'<>]{1,64}:([^@/\s"'<>]{3,128})@[\w.\[\]-]+'''
+secretGroup = 1
+keywords = ["://"]
+tags = ["password", "secret-mask"]
+[[rules.allowlists]]
+regexes = [
+  '''^(?:\$\{?[\w.:-]*\}?|\$\(.*|%[\w.]+%|\{\{.*\}\}|<[^<>]*>|\*+|x{3,}|X{3,}|\.{3,}|-+)$''',
+  '''^(?i:true|false|null|none|nil|undefined|password|passwd|pass)$''',
+]
+
+[[rules]]
+id = "secret-mask-connection-string-password"
+description = "Password in a key=value connection string: Server=…;User Id=…;Password=…;"
+regex = '''(?i)(?:user[ _]?id|uid|user(?:name)?|server|data source|host)[ \t]*=[^;"'\r\n]*;[^"'\r\n]*?\b(?:password|pwd)[ \t]*=[ \t]*([^;"'\r\n]{3,128})'''
+secretGroup = 1
+keywords = ["password", "pwd"]
+tags = ["password", "secret-mask"]
+[[rules.allowlists]]
+regexes = [
+  '''^(?:\$\{?[\w.:-]*\}?|\$\(.*|%[\w.]+%|\{\{.*\}\}|<[^<>]*>|\*+|x{3,}|X{3,}|\.{3,}|-+)$''',
+  '''^(?i:true|false|null|none|nil|undefined|password|passwd|pass)$''',
+]
+
+[[rules]]
+id = "secret-mask-xml-password"
+description = "Password in an XML element: <password>…</password>, <db.password>…</db.password>."
+regex = '''(?i)<[\w:.-]*passw(?:or)?d[\w:.-]*>([^<\r\n]{3,128})</[\w:.-]*passw(?:or)?d[\w:.-]*>'''
+secretGroup = 1
+keywords = ["passw"]
+tags = ["password", "secret-mask"]
+[[rules.allowlists]]
+regexes = [
+  '''^(?:\$\{?[\w.:-]*\}?|\$\(.*|%[\w.]+%|\{\{.*\}\}|<[^<>]*>|\*+|x{3,}|X{3,}|\.{3,}|-+)$''',
+  '''^(?i:true|false|null|none|nil|undefined|password|passwd|pass)$''',
+]

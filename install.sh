@@ -1,12 +1,15 @@
 #!/bin/sh
-# One-line installer for secret-mask: downloads the release binary, verifies it against SHA256SUMS,
-# installs it and configures every detected coding agent (`secret-mask install`).
+# One-line installer and upgrader for secret-mask: downloads the release binary, verifies it against
+# SHA256SUMS, installs it and configures every detected coding agent (`secret-mask install`).
 #
 #   curl -fsSL https://raw.githubusercontent.com/benakaben10/secret-mask/master/install.sh | sh
 #   curl -fsSL .../install.sh | sh -s -- --dir /usr/local/bin --clients claude,codex
 #
+# Run it again to upgrade: an existing secret-mask on PATH is replaced in place (so agent configs and git
+# pre-commit hooks that call it by path keep working) and the agent configuration is refreshed.
+#
 # Options:
-#   --dir PATH         install directory (default: ~/.local/bin)
+#   --dir PATH         install directory (default: where secret-mask already is, else ~/.local/bin)
 #   --version TAG      release to install, e.g. v1.2.0 (default: latest)
 #   --clients LIST     configure only these agents (claude, codex, gemini, cursor, vscode, copilot)
 #   --no-hooks         configure agents without the read-blocking hooks
@@ -19,7 +22,7 @@ set -eu
 # Everything runs from main, called on the last line, so a truncated `curl | sh` download runs nothing.
 main() {
   REPO=benakaben10/secret-mask
-  DIR="$HOME/.local/bin"
+  DIR=""
   VERSION=latest
   CLIENTS=""
   NO_HOOKS=false
@@ -34,7 +37,7 @@ main() {
       --clients=*) CLIENTS=${1#--clients=}; shift ;;
       --no-hooks) NO_HOOKS=true; shift ;;
       --skip-config) SKIP_CONFIG=true; shift ;;
-      -h|--help) sed -n '2,17p' "$0" 2>/dev/null || echo "see https://github.com/$REPO#install"; exit 0 ;;
+      -h|--help) sed -n '2,20p' "$0" 2>/dev/null || echo "see https://github.com/$REPO#install"; exit 0 ;;
       *) echo "install.sh: unknown option '$1' (see --help)" >&2; exit 2 ;;
     esac
   done
@@ -73,11 +76,23 @@ main() {
     exit 1
   fi
   ASSET="secret-mask_${OS}_${ARCH}${EXT}"
+  if [ -z "$DIR" ]; then
+    # Upgrade in place: keep the path that agent configs and git hooks already call.
+    CURRENT=$(command -v "secret-mask$EXT" 2>/dev/null || true)
+    if [ -n "$CURRENT" ] && [ ! -L "$CURRENT" ] && [ -w "$(dirname "$CURRENT")" ]; then
+      DIR=$(dirname "$CURRENT")
+    else
+      DIR="$HOME/.local/bin"
+      [ -n "$CURRENT" ] && echo "note: $CURRENT is not replaced (symlink or not writable); installing to $DIR"
+    fi
+  fi
   DEST="$DIR/secret-mask$EXT"
+  OLD=""
+  [ -x "$DEST" ] && OLD=$("$DEST" version 2>/dev/null | awk '{ print $2 }')
 
   echo "secret-mask installer"
   echo "  release: $VERSION ($ASSET)"
-  echo "  target:  $DEST"
+  echo "  target:  $DEST${OLD:+ (installed: $OLD)}"
 
   TMP=$(mktemp -d)
   trap 'rm -rf "$TMP"' EXIT
@@ -113,23 +128,34 @@ main() {
   if [ "$OS" = darwin ]; then
     xattr -d com.apple.quarantine "$TMP/$ASSET" >/dev/null 2>&1 || true
   fi
-  "$TMP/$ASSET" version >/dev/null 2>&1 || { echo "error: the downloaded binary does not run here" >&2; exit 1; }
+  NEW=$("$TMP/$ASSET" version 2>/dev/null | awk '{ print $2 }') || { echo "error: the downloaded binary does not run here" >&2; exit 1; }
+  [ -n "$NEW" ] || { echo "error: the downloaded binary does not run here" >&2; exit 1; }
 
   # Copy next to the target, then rename: a running binary is never overwritten in place.
   mkdir -p "$DIR"
   cp "$TMP/$ASSET" "$DIR/.secret-mask.$$"
   mv -f "$DIR/.secret-mask.$$" "$DEST"
-  echo "Installed: $("$DEST" version)"
+  if [ -z "$OLD" ]; then
+    echo "Installed: $("$DEST" version)"
+  elif [ "$OLD" = "$NEW" ]; then
+    echo "Already at $NEW; binary reinstalled."
+  else
+    echo "Upgraded: $OLD -> $NEW"
+  fi
 
   if [ "$SKIP_CONFIG" = true ]; then
     echo "Skipping agent configuration (--skip-config). Run '$DEST install' later."
   else
+    # Also refreshes what an earlier version wrote (skill text, hook commands).
     echo ""
     set -- install
     [ -n "$CLIENTS" ] && set -- "$@" --clients "$CLIENTS"
     [ "$NO_HOOKS" = true ] && set -- "$@" --no-hooks
     "$DEST" "$@"
   fi
+
+  echo ""
+  echo "Shell completion (bash, zsh): $DEST completion --install"
 
   case ":$PATH:" in
     *":$DIR:"*) ;;

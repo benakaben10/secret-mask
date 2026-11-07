@@ -155,7 +155,7 @@ func TestMCPServer(t *testing.T) {
 	for _, tool := range resps[1]["result"].(map[string]any)["tools"].([]any) {
 		names = append(names, tool.(map[string]any)["name"].(string))
 	}
-	if strings.Join(names, ",") != "check_secrets,masking_status,masking_guide" {
+	if strings.Join(names, ",") != "check_secrets,masking_status,masking_guide,next_steps,review_findings,list_rules,get_rule,test_rule,add_rule" {
 		t.Errorf("tools = %v (mask/restore must not be exposed)", names)
 	}
 	text, isErr := toolText(resps[2])
@@ -290,5 +290,152 @@ func TestHookClients(t *testing.T) {
 	}
 	if code := h.run("hook", "--client", "emacs"); code != ExitUsage {
 		t.Errorf("unknown client exit %d", code)
+	}
+}
+
+func mcpCall(name string, args map[string]any) string {
+	b, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 9, "method": "tools/call", "params": map[string]any{"name": name, "arguments": args}})
+	return string(b)
+}
+
+func (h *harness) tool(name string, args map[string]any) (string, bool) {
+	h.t.Helper()
+	resps := h.mcpExchange([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}`,
+		mcpCall(name, args),
+	})
+	return toolText(resps[1])
+}
+
+func TestMCPNextStepsGuidesTheUser(t *testing.T) {
+	h := newHarness(t, map[string]string{"README.md": "docs\n"})
+	if text, _ := h.tool("next_steps", nil); !strings.Contains(text, "SAFE, nothing to mask") {
+		t.Errorf("clean project: %s", text)
+	}
+
+	for rel, content := range leakyProject() {
+		os.MkdirAll(filepath.Dir(filepath.Join(h.dir, rel)), 0o755)
+		h.write(rel, content)
+	}
+	text, _ := h.tool("next_steps", nil)
+	for _, want := range []string{"NOT SAFE", "STOP", "secret-mask mask " + h.dir, "at least 8 characters", ".env"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("unmasked: missing %q in\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, awsKey) {
+		t.Error("next_steps leaks a secret")
+	}
+
+	if code := h.run("mask", h.dir); code != ExitOK {
+		t.Fatal("mask")
+	}
+	text, _ = h.tool("next_steps", nil)
+	for _, want := range []string{"STATE: SAFE. The project is masked", "unseal", "secret-mask restore " + h.dir, "restore --clean", "missing: 0"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("masked: missing %q in\n%s", want, text)
+		}
+	}
+
+	// A new secret after masking: same password, same vault.
+	h.write("new.env", "PASSWORD=Hunter2-2024\n")
+	if text, _ := h.tool("next_steps", nil); !strings.Contains(text, "same password") {
+		t.Errorf("new secret: %s", text)
+	}
+	os.Remove(filepath.Join(h.dir, "new.env"))
+
+	// A placeholder deleted by mistake.
+	h.write(".env", "PORT=8080\n")
+	if text, _ := h.tool("next_steps", nil); !strings.Contains(text, "MISSING") || !strings.Contains(text, "restore --force") {
+		t.Errorf("missing placeholder: %s", text)
+	}
+
+	// The vault is gone.
+	os.Remove(filepath.Join(h.dir, DefaultVault))
+	if text, _ := h.tool("next_steps", nil); !strings.Contains(text, "another vault") {
+		t.Errorf("foreign placeholders: %s", text)
+	}
+}
+
+func TestMCPRuleTools(t *testing.T) {
+	h := newHarness(t, map[string]string{"config/app.env": "T=acme_pr_Q7xT2mZ9vB4nR8wK3sD6fH1j\n"})
+	text, _ := h.tool("list_rules", map[string]any{"source": "secret-mask"})
+	if !strings.Contains(text, "secret-mask-password-unquoted [secret-mask]") || !strings.Contains(text, "of 5 matching") {
+		t.Errorf("list_rules: %s", text)
+	}
+	if text, _ := h.tool("list_rules", map[string]any{"limit": 10}); !strings.Contains(text, "More: call again with offset=10") || !strings.Contains(text, "Global allowlists") {
+		t.Errorf("paging: %s", text)
+	}
+	if text, _ := h.tool("list_rules", map[string]any{"query": "aws-access", "details": true}); !strings.Contains(text, `"regex"`) {
+		t.Errorf("details: %s", text)
+	}
+	if text, isErr := h.tool("get_rule", map[string]any{"id": "aws-access-token"}); isErr || !strings.Contains(text, `"keywords"`) {
+		t.Errorf("get_rule: %s", text)
+	}
+	if _, isErr := h.tool("get_rule", map[string]any{"id": "nope"}); !isErr {
+		t.Error("unknown rule")
+	}
+
+	rule := map[string]any{"id": "acme-token", "regex": `\b(acme_[a-z]{2}_[A-Za-z0-9]{24})\b`, "keywords": []string{"acme_"}}
+	test := map[string]any{"sample": "X=acme_pr_AAAAbbbbCCCCddddEEEEffff", "scan_project": true}
+	for k, v := range rule {
+		test[k] = v
+	}
+	text, isErr := h.tool("test_rule", test)
+	if isErr || !strings.Contains(text, `secret (masked part) = "acme_pr_AAAAbbbbCCCCddddEEEEffff"`) || !strings.Contains(text, "config/app.env:1") || strings.Contains(text, "acme_pr_Q7xT2") {
+		t.Errorf("test_rule: %s", text)
+	}
+	if _, err := os.Stat(filepath.Join(h.dir, ".gitleaks.toml")); !os.IsNotExist(err) {
+		t.Error("test_rule wrote the config")
+	}
+
+	bad := map[string]any{"id": "acme-token", "regex": rule["regex"], "sample": "nothing here"}
+	if text, isErr := h.tool("add_rule", bad); !isErr || !strings.Contains(text, "does not match the sample") {
+		t.Errorf("add_rule with a non-matching sample: %s", text)
+	}
+	text, isErr = h.tool("add_rule", rule)
+	if isErr || !strings.Contains(text, "finds 1 unmasked secret(s)") {
+		t.Errorf("add_rule: %s", text)
+	}
+	if text, isErr := h.tool("add_rule", map[string]any{"id": "aws-access-token", "regex": "x(y)"}); !isErr || !strings.Contains(text, "already exists") {
+		t.Errorf("replacing a default rule: %s", text)
+	}
+	if code := h.run("check", h.dir); code != ExitFound {
+		t.Errorf("check after add_rule: exit %d", code)
+	}
+	if code := h.run("rules", "--source", "project", h.dir); code != ExitOK || !strings.Contains(h.stdout.String(), "acme-token") {
+		t.Errorf("rules: %s", h.stdout.String())
+	}
+	if code := h.run("rules", "--id", "acme-token", h.dir); code != ExitOK || !strings.Contains(h.stdout.String(), `"source": "project"`) {
+		t.Errorf("rules --id: %s", h.stdout.String())
+	}
+}
+
+func TestMCPReviewFindings(t *testing.T) {
+	h := newHarness(t, map[string]string{
+		".env":                   "DATABASE_URL=postgres://app:Devpass-123@localhost:5432/app\nPROD_DB_PASSWORD=Pr0d-S3cret!\n",
+		"docker-compose.dev.yml": "services:\n  db:\n    environment:\n      POSTGRES_PASSWORD: Compose-Pass9\n",
+	})
+	text, isErr := h.tool("review_findings", nil)
+	if isErr {
+		t.Fatal(text)
+	}
+	for _, want := range []string{
+		"DATABASE_URL=postgres://app:«redacted»@localhost:5432/app", "may be a local-dev value",
+		"PROD_DB_PASSWORD=«redacted»", "looks like a REAL credential",
+		"POSTGRES_PASSWORD: «redacted»", "may be a test/dev value",
+		".env:secret-mask-password-unquoted:2", "targetRules", "stopwords", "do not edit .gitleaksignore",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("missing %q in\n%s", want, text)
+		}
+	}
+	for _, secret := range []string{"Devpass-123", "Pr0d-S3cret!", "Compose-Pass9"} {
+		if strings.Contains(text, secret) {
+			t.Errorf("review_findings leaks %q", secret)
+		}
+	}
+	if text, _ := h.tool("next_steps", nil); !strings.Contains(text, "review_findings") {
+		t.Errorf("next_steps does not point to review_findings: %s", text)
 	}
 }
