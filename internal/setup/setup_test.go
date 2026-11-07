@@ -49,7 +49,7 @@ func TestProjectScopeFresh(t *testing.T) {
 		t.Errorf("hook commands = %v", got)
 	}
 	entry := s["hooks"].(map[string]any)["PreToolUse"].([]any)[0].(map[string]any)
-	if entry["matcher"] != "Read|Grep|NotebookRead" {
+	if entry["matcher"] != "Read|Grep|NotebookRead|Bash|mcp__.*" {
 		t.Errorf("matcher = %v", entry["matcher"])
 	}
 	server := readJSON(t, mcp)["mcpServers"].(map[string]any)[ServerName].(map[string]any)

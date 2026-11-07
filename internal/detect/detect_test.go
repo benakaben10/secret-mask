@@ -378,3 +378,55 @@ func TestDevAllowlists(t *testing.T) {
 		t.Errorf("with dev allowlists: %v", secrets(got))
 	}
 }
+
+func TestBuiltinSecretRules(t *testing.T) {
+	want := map[string]string{
+		".env":               "mysecret1",
+		".env.local":         "abcd1234",
+		"config/app.yaml":    "dev-jwt-secret",
+		"src/config.ts":      "hello-key-1",
+		"appsettings.json":   "3f2a9c1e-1b2c-4d5e-8f90-123456789abc",
+		"src/rates.js":       "0123456789abcdef0123",
+		"deploy/amqp.env":    "guest",
+		"config/private.ini": "my-private-k3y",
+	}
+	files := map[string]string{
+		".env":               "CLIENT_SECRET=mysecret1\n",
+		".env.local":         "export API_KEY=abcd1234\n",
+		"config/app.yaml":    "jwt:\n  secret: dev-jwt-secret\n",
+		"src/config.ts":      `const apiKey = "hello-key-1";`,
+		"appsettings.json":   `{"internalAuthorization": {"svc-a1b2-c3d4-client": "3f2a9c1e-1b2c-4d5e-8f90-123456789abc"}}`,
+		"src/rates.js":       `fetch("https://v6.exchangerate-api.com/v6/0123456789abcdef0123/latest/USD")`,
+		"deploy/amqp.env":    "BROKER_URL=amqp://guest:guest@rabbitmq:5672/\n",
+		"config/private.ini": "private_key = my-private-k3y\n",
+	}
+	got, err := Scan(context.Background(), Options{Root: tree(t, files)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := map[string]bool{}
+	for _, f := range got {
+		if want[f.File] == f.Secret {
+			found[f.File] = true
+		}
+	}
+	for file, secret := range want {
+		if !found[file] {
+			t.Errorf("%s: %q not found; got %v", file, secret, secrets(got))
+		}
+	}
+
+	ignored := map[string]string{
+		"k8s/deploy.yaml": "spec:\n  secretName: db-credentials\n  existingSecret: my-secret\n  valueFrom:\n    secretKeyRef:\n      name: db-secret\n      key: password\n",
+		"config/app.yaml": "auth:\n  tokenTtl: 3600\n  token_expiry: 1h\n  keyFile: /etc/ssl/key.pem\n  password_length: 12\n  publicKey: ssh-rsa-AAAAB3Nza\n",
+		".env":            "TOKEN_LIMIT=1000\nSECRET=changeme\nAPI_KEY=${API_KEY}\nACCESS_TOKEN=\n",
+		"src/auth.ts":     `const token = getToken(); if (token === "") {}; const label = "Your API key";`,
+	}
+	got, err = Scan(context.Background(), Options{Root: tree(t, ignored)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Errorf("references, settings and placeholders flagged: %v", secrets(got))
+	}
+}

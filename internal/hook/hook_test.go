@@ -253,3 +253,82 @@ func TestClientOutputs(t *testing.T) {
 		}
 	}
 }
+
+func TestMCPToolCalls(t *testing.T) {
+	dir := project(t)
+	leaky := map[string]bool{"leak.env": true}
+	tests := []struct {
+		name    string
+		raw     []byte
+		allow   bool
+		targets []string
+	}{
+		{"indexer without a path scans the project", input("mcp__codebase-memory-mcp__index_repository", map[string]any{}, dir), false, []string{"."}},
+		{"indexer with repo_path", input("mcp__codebase-memory-mcp__index_repository", map[string]any{"repo_path": dir}, dir), false, []string{"."}},
+		{"file argument", input("mcp__fs__read_text_file", map[string]any{"path": "leak.env"}, dir), false, []string{"leak.env"}},
+		{"query tools are not indexers", input("mcp__codebase-memory-mcp__search_graph", map[string]any{"query": "x"}, dir), true, nil},
+		{"status tools are not indexers", input("mcp__codebase-memory-mcp__index_status", map[string]any{}, dir), true, nil},
+		{"secret-mask's own tools", input("mcp__secret-mask__check_secrets", map[string]any{"path": "leak.env"}, dir), true, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var calls []call
+			d := Evaluate(tt.raw, dir, own, fake(leaky, nil, &calls))
+			if d.Allow != tt.allow {
+				t.Errorf("allow = %v: %s", d.Allow, d.Reason)
+			}
+			var got []string
+			for _, c := range calls {
+				got = append(got, c.target)
+			}
+			if strings.Join(got, ",") != strings.Join(tt.targets, ",") {
+				t.Errorf("scanned %v, want %v", got, tt.targets)
+			}
+		})
+	}
+	// Cursor sends MCP arguments as a JSON string.
+	raw, _ := json.Marshal(map[string]any{"hook_event_name": "beforeMCPExecution", "tool_name": "index_repository",
+		"tool_input": `{"repo_path":"` + dir + `"}`, "workspace_roots": []string{dir}})
+	var calls []call
+	if d := Evaluate(raw, "", own, fake(leaky, nil, &calls)); d.Allow {
+		t.Errorf("cursor MCP indexer allowed, calls %+v", calls)
+	}
+}
+
+func TestRevealIsBlocked(t *testing.T) {
+	dir := project(t)
+	cursorShell, _ := json.Marshal(map[string]any{"hook_event_name": "beforeShellExecution", "command": "secret-mask reveal .", "cwd": dir})
+	for name, raw := range map[string][]byte{
+		"bash":   input("Bash", map[string]any{"command": "cd app && /usr/local/bin/secret-mask reveal --id x ."}, dir),
+		"argv":   input("Bash", map[string]any{"command": []any{"bash", "-lc", "secret-mask reveal"}}, dir),
+		"cursor": cursorShell,
+	} {
+		var calls []call
+		d := Evaluate(raw, dir, own, fake(nil, nil, &calls))
+		if d.Allow || !strings.Contains(d.Reason, "user's own terminal") {
+			t.Errorf("%s: %+v", name, d)
+		}
+	}
+	var calls []call
+	if d := Evaluate(input("Bash", map[string]any{"command": "secret-mask status ."}, dir), dir, own, fake(nil, nil, &calls)); !d.Allow {
+		t.Errorf("status blocked: %s", d.Reason)
+	}
+}
+
+func TestSessionContext(t *testing.T) {
+	dir := project(t)
+	raw, _ := json.Marshal(map[string]any{"hook_event_name": "SessionStart", "cwd": dir})
+	var calls []call
+	ctx := SessionContext(raw, "", fake(map[string]bool{"leak.env": true}, nil, &calls))
+	for _, want := range []string{"BEFORE anything else", "indexing", "secret-mask mask " + dir, "next_steps"} {
+		if !strings.Contains(ctx, want) {
+			t.Errorf("context missing %q: %s", want, ctx)
+		}
+	}
+	if !strings.Contains(string(SessionOutput(Claude, ctx)), `"hookEventName":"SessionStart"`) || SessionOutput(Claude, "") != nil {
+		t.Error("session output")
+	}
+	if got := SessionContext(raw, "", fake(nil, nil, &calls)); got != "" {
+		t.Errorf("clean project: %q", got)
+	}
+}

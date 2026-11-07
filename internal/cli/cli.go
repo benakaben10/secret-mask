@@ -45,6 +45,8 @@ Usage:
   secret-mask mask    [flags] [dir]    replace detected secrets with placeholders, encrypt the originals into a vault
   secret-mask restore [flags] [dir]    put the original values back (needs the password)
   secret-mask status  [flags] [dir]    check that every placeholder is still present (no password)
+  secret-mask reveal  [flags] [dir]    show the real value behind each placeholder and where it is (your own
+                                       terminal only: never for AI agents)
   secret-mask check   [flags] [path]   fail (exit 4) if path contains unmasked secrets (no password)
   secret-mask install   [flags]        set up every detected coding agent (Claude Code, Codex, Gemini, Cursor,
                                        VS Code, Copilot CLI): MCP server, read-blocking hook, skill, instructions
@@ -74,6 +76,7 @@ type App struct {
 	Getenv         func(string) string
 	ReadPassword   func(confirm bool) (string, error)
 	Executable     func() (string, error)
+	IsTerminal     func() bool // stdin and stdout are an interactive terminal
 }
 
 // New returns an App wired to the real process environment.
@@ -81,6 +84,7 @@ func New() *App {
 	return &App{
 		Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr,
 		Getenv: os.Getenv, ReadPassword: PromptPassword, Executable: os.Executable,
+		IsTerminal: func() bool { return isCharDevice(os.Stdin) && isCharDevice(os.Stdout) },
 	}
 }
 
@@ -111,6 +115,8 @@ func (a *App) Run(args []string) int {
 		err = a.upgrade(args[1:])
 	case "completion":
 		err = a.completion(args[1:])
+	case "reveal":
+		err = a.reveal(args[1:])
 	case "protect":
 		err = a.protect(args[1:])
 	case "pre-commit":

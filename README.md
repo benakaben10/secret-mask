@@ -66,6 +66,7 @@ secret-mask mask   .        # mask + write .secret-mask.vault and SECRET_MASK_AI
 secret-mask status .        # every placeholder still present? (no password)
 secret-mask restore .       # put the real values back
 secret-mask restore --clean .   # ...and delete the vault and guide
+secret-mask reveal  .       # the real value behind each placeholder, with its location (your terminal only)
 secret-mask protect .       # git pre-commit hook: no commit with unmasked secrets
 secret-mask rules .         # the detection rules in use
 secret-mask upgrade         # how to upgrade to a new release
@@ -135,11 +136,13 @@ Every scan (`check`, `mask`, the agent hooks, the MCP server, `pre-commit`) uses
    [config/gitleaks.toml](https://github.com/gitleaks/gitleaks/blob/v8.30.1/config/gitleaks.toml)). They find
    provider tokens (AWS, GitHub, Slack, OpenAI, Stripe, private keys, JWTs…) and, with `generic-api-key`,
    random-looking values assigned to `key`/`token`/`secret`/`password` names.
-2. **secret-mask's password rules** ([internal/detect/rules.toml](internal/detect/rules.toml)). They catch
-   passwords people choose themselves (`Admin@123`, `hunter22`), which have too little entropy for gitleaks.
-   They are strict on purpose (a value in `.env.example` is caught too); only obvious non-values are skipped:
-   `$VAR`, `${VAR}`, `$(cmd)`, `{{ template }}`, `<placeholder>`, `***`, `xxxx`, `true`/`null`, the bare word
-   `password`.
+2. **secret-mask's rules** ([internal/detect/rules.toml](internal/detect/rules.toml)). They catch secrets
+   people choose themselves (`Admin@123`, `CLIENT_SECRET=mysecret1`), which have too little entropy for
+   gitleaks, and a few formats it misses. They are strict on purpose (a value in `.env.example` is caught too);
+   only obvious non-values are skipped: `$VAR`, `${VAR}`, `$(cmd)`, `{{ template }}`, `<placeholder>`, `***`,
+   `xxxx`, `true`/`null`, `changeme`, numbers for token settings, and keys that name a reference or a setting
+   (`secretName`, `existingSecret`, `secretKeyRef`, `tokenTtl`, `token_expiry`, `keyFile`, `publicKey`,
+   `password_length`…).
 
    | Rule id | Finds |
    |---|---|
@@ -148,6 +151,13 @@ Every scan (`check`, `mask`, the agent hooks, the MCP server, `pre-commit`) uses
    | `secret-mask-url-password` | the password of `scheme://user:password@host` (only that part is masked) |
    | `secret-mask-connection-string-password` | `Server=…;User Id=…;Password=…;` |
    | `secret-mask-xml-password` | `<password>…</password>`, `<db.password>…</db.password>` |
+   | `secret-mask-secret-quoted` | `client_secret = "…"`, `"apiKey": "…"`, `token: '…'` in any file, any entropy (`secret`, `token`, `api key`, `access key`, `private key`, `auth key`, `credential`) |
+   | `secret-mask-secret-unquoted` | `CLIENT_SECRET=…`, `api_key: …` in config files, any entropy |
+   | `secret-mask-client-credential-map` | a UUID secret mapped from a client id in JSON (`"svc-a1b2-c3d4": "3f2a9c1e-…"`) |
+   | `secret-mask-exchangerate-api-key` | the API key in `exchangerate-api.com/v6/<key>/…` URLs |
+
+   A value found by several rules (a GitHub token named `GITHUB_TOKEN`) is one finding, reported under the most
+   specific rule.
 
 3. **The project's rules**: the first of `--config FILE`, `$GITLEAKS_CONFIG`, `<project>/.gitleaks.toml`.
 
@@ -247,6 +257,48 @@ stopwords = ["localdev"]
   replaced by «redacted», a hint (real credential vs. local-dev/test value) and these allowlist lines ready to
   copy. The decision and the edit stay with you.
 
+## See the real values (your terminal only)
+
+```sh
+secret-mask reveal .                         # every placeholder: file:line, rule, placeholder, real value
+secret-mask reveal --file config/app.json .  # one file
+secret-mask reveal --id 8656926daa6d6f8c .   # one placeholder
+```
+
+```
+.env:2  aws-access-token  __SECRET_MASK_e39bd706e19a4914__  AKIA…
+config/app.json:3  github-pat  __SECRET_MASK_e9cbe5f120495218__  ghp_…
+(missing)  slack-bot-token  __SECRET_MASK_d546f3e8ee66a712__  xoxb-…  masked in: .env
+```
+
+`reveal` is for you, not for AI agents:
+
+- it runs only when stdin and stdout are an interactive terminal (not in a pipe, a script or an agent's shell);
+- it always asks for the password on the terminal; `$SECRET_MASK_PASSWORD` is ignored;
+- it refuses to run when a coding agent's environment is detected (`CLAUDECODE`, `CODEX_SANDBOX`, `GEMINI_CLI`…);
+- no MCP tool exposes it, the agent hooks deny any shell command that runs it, and the skill forbids asking you
+  for its output.
+
+## Run before other MCP servers (indexers, code graphs)
+
+Tools such as codebase-memory-mcp's `index_repository` copy the project's source, secrets included, into their
+own database. secret-mask has to come first:
+
+- **Tool calls are covered.** The Claude Code hook matches `mcp__.*` (Codex: `Bash|mcp__.*`, Cursor:
+  `beforeMCPExecution`, Copilot: every tool). A call of another MCP server is checked like a read: the paths
+  in its arguments (`path`, `repo_path`, `root`, `files`…) are scanned, and an indexer called without a path
+  (`index`, `ingest`, `scan`, `embed`, `sync`, `upload`, `build`…) scans the whole project. With unmasked
+  secrets the call is denied. All matching hooks run and a single deny stops the call, so their order does
+  not matter.
+- **Session start.** A `SessionStart` hook (Claude Code, Codex) tells the agent, when the project has unmasked
+  secrets, to deal with them before anything else: no indexing, no graph, no reading until you have masked.
+  The skill and instructions say the same.
+- **Background indexing is not a tool call.** A server that indexes by itself (codebase-memory-mcp
+  `auto_index`, `auto_watch`, its daemon) cannot be stopped by any hook. Mask the project **before** opening an
+  agent session on it, keep `auto_index` off (its default) for projects with secrets, and if a project was
+  indexed while unmasked, delete that index (codebase-memory-mcp `delete_project`) and index again after
+  masking. Listing secret files in `.cbmignore` also keeps them out.
+
 ## AI agents
 
 ```sh
@@ -261,10 +313,10 @@ kept, re-running is a no-op, `uninstall` removes only what secret-mask wrote):
 
 | Agent (`--clients`) | MCP server | Read-blocking hook | Skill / instructions |
 |---|---|---|---|
-| Claude Code (`claude`) | `~/.claude.json` | `PreToolUse` `Read\|Grep\|NotebookRead` in `~/.claude/settings.json` | `~/.claude/skills/secret-mask` |
-| Codex CLI (`codex`) | `$CODEX_HOME/config.toml` | `PreToolUse` `Bash` in `$CODEX_HOME/hooks.json` | `AGENTS.md` block, `~/.agents/skills/secret-mask` |
+| Claude Code (`claude`) | `~/.claude.json` | `PreToolUse` `Read\|Grep\|NotebookRead\|Bash\|mcp__.*` and `SessionStart` in `~/.claude/settings.json` | `~/.claude/skills/secret-mask` |
+| Codex CLI (`codex`) | `$CODEX_HOME/config.toml` | `PreToolUse` `Bash\|mcp__.*` and `SessionStart` in `$CODEX_HOME/hooks.json` | `AGENTS.md` block, `~/.agents/skills/secret-mask` |
 | Gemini CLI (`gemini`) | `~/.gemini/settings.json` | `BeforeTool` (`read_file`, `read_many_files`, searches, shell) | `~/.gemini/GEMINI.md` block |
-| Cursor (`cursor`) | `~/.cursor/mcp.json` | `beforeReadFile`, `beforeShellExecution` in `~/.cursor/hooks.json` | `~/.cursor/skills/secret-mask` |
+| Cursor (`cursor`) | `~/.cursor/mcp.json` | `beforeReadFile`, `beforeShellExecution`, `beforeMCPExecution` in `~/.cursor/hooks.json` | `~/.cursor/skills/secret-mask` |
 | VS Code Copilot (`vscode`) | `Code/User/mcp.json` | `PreToolUse` in `~/.copilot/hooks/secret-mask.json` | `~/.copilot/skills/secret-mask` |
 | Copilot CLI (`copilot`) | `~/.copilot/mcp-config.json` | (shared with VS Code) | (shared with VS Code) |
 

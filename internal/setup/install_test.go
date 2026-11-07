@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -108,7 +109,9 @@ func TestInstallEveryClient(t *testing.T) {
 	}
 	codexHooks := readJSON(t, filepath.Join(home, ".codex", "hooks.json"))
 	pre := codexHooks["hooks"].(map[string]any)["PreToolUse"].([]any)[0].(map[string]any)
-	if pre["matcher"] != "Bash" || !reflect.DeepEqual(allHookCommands(codexHooks), []string{"/opt/bin/secret-mask hook --client codex"}) {
+	codexCmd := "/opt/bin/secret-mask hook --client codex"
+	if pre["matcher"] != "Bash|mcp__.*" || !reflect.DeepEqual(allHookCommands(codexHooks), []string{codexCmd, codexCmd}) ||
+		codexHooks["hooks"].(map[string]any)["SessionStart"] == nil {
 		t.Errorf("codex hooks = %v", codexHooks)
 	}
 	if !strings.Contains(readText(t, filepath.Join(home, ".codex", "AGENTS.md")), "## Secrets (secret-mask)") {
@@ -134,7 +137,7 @@ func TestInstallEveryClient(t *testing.T) {
 
 	// Cursor
 	cursor := readJSON(t, filepath.Join(home, ".cursor", "hooks.json"))
-	if cursor["version"] != float64(1) || len(cursor["hooks"].(map[string]any)) != 2 {
+	if cursor["version"] != float64(1) || len(cursor["hooks"].(map[string]any)) != 3 {
 		t.Errorf("cursor hooks = %v", cursor)
 	}
 	if readJSON(t, filepath.Join(home, ".cursor", "mcp.json"))["mcpServers"] == nil {
@@ -197,7 +200,7 @@ func TestUninstallRestoresUserFiles(t *testing.T) {
 	if strings.Join(rep.Clients, ",") != "Claude Code,Codex CLI,Gemini CLI,Cursor,VS Code (Copilot)" {
 		t.Errorf("detected %v", rep.Clients)
 	}
-	if got := allHookCommands(readJSON(t, filepath.Join(home, ".cursor", "hooks.json"))); len(got) != 3 || got[0] != "mine" && got[1] != "mine" {
+	if got := allHookCommands(readJSON(t, filepath.Join(home, ".cursor", "hooks.json"))); len(got) != 4 || !slices.Contains(got, "mine") {
 		t.Errorf("cursor hooks = %v", got)
 	}
 	agents := readText(t, filepath.Join(home, ".codex", "AGENTS.md"))

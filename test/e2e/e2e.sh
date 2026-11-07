@@ -118,7 +118,7 @@ if diff -r "$W/original" "$W/rt" >"$W/out" 2>&1; then ok "restored tree is byte-
 echo "-- Claude Code setup"
 run 0 "setup" "$SM" setup "$P"
 has "$P/.claude/settings.json" '"command": "secret-mask hook"' "hook installed"
-has "$P/.claude/settings.json" '"matcher": "Read|Grep|NotebookRead"' "hook matcher"
+has "$P/.claude/settings.json" '"matcher": "Read|Grep|NotebookRead|Bash|mcp__.*"' "hook matcher"
 has "$P/.mcp.json" '"secret-mask"' "MCP server registered"
 run 0 "setup again" "$SM" setup "$P"
 has "$W/out" "nothing changed" "setup is idempotent"
@@ -277,6 +277,51 @@ run 0 "completion --install zsh" env HOME="$W/chome" SHELL=/bin/zsh "$SM" comple
 has "$W/chome/.zshrc" "completion zsh" "zsh startup file loads it"
 run 0 "completion --uninstall zsh" env HOME="$W/chome" "$SM" completion --uninstall zsh
 if [ -e "$W/chome/.zshrc" ]; then bad "uninstall removes the block"; else ok "uninstall removes the block"; fi
+
+echo "-- secret, token and API key rules"
+K=$W/keys
+mkdir -p "$K/config" "$K/src" "$K/k8s"
+printf 'CLIENT_SECRET=mysecret1\nTOKEN_LIMIT=1000\nGITHUB_TOKEN=%s\n' "$GH" >"$K/.env"
+printf '{"internalAuthorization": {"svc-a1b2-c3d4-client": "3f2a9c1e-1b2c-4d5e-8f90-123456789abc"}}\n' >"$K/config/auth.json"
+printf 'fetch("https://v6.exchangerate-api.com/v6/0123456789abcdef0123/latest/USD")\n' >"$K/src/rates.js"
+printf 'spec:\n  secretName: db-credentials\n  tokenTtl: 3600\n' >"$K/k8s/app.yaml"
+run 4 "low-entropy secrets, client maps and URL keys are detected" "$SM" check "$K"
+has "$W/out" "4 unmasked secret(s)" "four findings; references and settings are not secrets"
+has "$W/out" ".env:3  github-pat" "a token found by two rules is reported once, under the specific rule"
+has "$W/out" "secret-mask-client-credential-map" "client credential map"
+has "$W/out" "secret-mask-exchangerate-api-key" "API key in a URL path"
+
+echo "-- reveal: real values, for the user's terminal only"
+R=$W/reveal
+rm -rf "$R" && cp -R "$W/original" "$R"
+run 0 "mask a copy" env SECRET_MASK_PASSWORD=$PW "$SM" mask "$R"
+run 1 "reveal refuses without a terminal" env SECRET_MASK_PASSWORD=$PW "$SM" reveal "$R"
+has "$W/out" "interactive terminal" "reason given"
+hasnt "$W/out" "$AWS" "nothing revealed"
+if command -v script >/dev/null 2>&1 && script --version 2>/dev/null | grep -q util-linux; then
+  run 1 "reveal refuses inside a coding agent" sh -c "printf '%s\n' '$PW' | CLAUDECODE=1 script -qec '$SM reveal $R' /dev/null"
+  has "$W/out" "inside a coding agent" "agent environment detected"
+  run 0 "reveal in a terminal shows values and locations" sh -c "printf '%s\n' '$PW' | script -qec '$SM reveal $R' /dev/null"
+  has "$W/out" ".env:1  aws-access-token  __SECRET_MASK_" "file, line, rule and placeholder"
+  has "$W/out" "$AWS" "the real value"
+else
+  echo "-- reveal in a terminal: skipped (needs util-linux script)"
+fi
+
+echo "-- hooks: reveal, other MCP servers, session start"
+printf '{"tool_name":"Bash","cwd":"%s","tool_input":{"command":"secret-mask reveal ."}}' "$R" >"$W/h.in"
+run 0 "hook on secret-mask reveal" sh -c "\"$SM\" hook <\"$W/h.in\""
+has "$W/out" '"permissionDecision":"deny"' "an agent may not run reveal"
+printf '{"tool_name":"mcp__codebase-memory-mcp__index_repository","cwd":"%s","tool_input":{"repo_path":"%s"}}' "$W/original" "$W/original" >"$W/h.in"
+run 0 "hook on another MCP server's indexer" sh -c "\"$SM\" hook <\"$W/h.in\""
+has "$W/out" '"permissionDecision":"deny"' "indexing a project with unmasked secrets is blocked"
+printf '{"tool_name":"mcp__codebase-memory-mcp__index_repository","cwd":"%s","tool_input":{"repo_path":"%s"}}' "$R" "$R" >"$W/h.in"
+run 0 "hook on the indexer after masking" sh -c "\"$SM\" hook <\"$W/h.in\""
+if [ -s "$W/out" ]; then bad "indexing a masked project is allowed"; else ok "indexing a masked project is allowed"; fi
+printf '{"hook_event_name":"SessionStart","cwd":"%s"}' "$W/original" >"$W/h.in"
+run 0 "session start" sh -c "\"$SM\" hook <\"$W/h.in\""
+has "$W/out" "BEFORE anything else" "the agent is told to mask first"
+has "$W/out" "additionalContext" "as session context"
 
 echo "-- upgrade"
 run 0 "upgrade prints the command" "$SM" upgrade --version v9.9.9

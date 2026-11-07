@@ -39,21 +39,32 @@ func (a *App) hook(ctx context.Context, args []string) error {
 	}
 	own := map[string]bool{DefaultVault: true, guide.DefaultName: true}
 	projectDir := cmp.Or(a.Getenv("CLAUDE_PROJECT_DIR"), a.Getenv("GEMINI_PROJECT_DIR"))
-	d := hook.Evaluate(raw, projectDir, own, func(root, rel string) ([]detect.Finding, error) {
+	check := func(root, rel string) ([]detect.Finding, error) {
 		return checkPath(ctx, root, filepath.Join(root, rel), *config)
-	})
+	}
+	var event struct {
+		HookEventName string `json:"hook_event_name"`
+	}
+	if json.Unmarshal(raw, &event) == nil && event.HookEventName == "SessionStart" {
+		if out := hook.SessionOutput(*client, hook.SessionContext(raw, projectDir, check)); out != nil {
+			fmt.Fprintln(a.Stdout, string(out))
+		}
+		return nil
+	}
+	d := hook.Evaluate(raw, projectDir, own, check)
 	if out := hook.Output(*client, d); out != nil {
 		fmt.Fprintln(a.Stdout, string(out))
 	}
 	return nil
 }
 
-const mcpInstructions = `secret-mask protects secrets in this project. Call next_steps at the start of a task: if it reports
+const mcpInstructions = `secret-mask protects secrets in this project. Call next_steps at the start of a task, before indexing
+the project or building a code graph with any other MCP server and before reading files: if it reports
 unmasked secrets, stop, give the user the mask command it prints (it needs their password, which you never
 see) and continue only once next_steps reports SAFE. When the task is done, check masking_status (missing: 0)
 and give the user the restore ("unseal") commands next_steps prints. When a finding may be a local-dev or test
 value rather than a real credential, call review_findings and let the user choose: mask, or allowlist it
-themselves. Never change __SECRET_MASK_<16 hex>__ placeholders; see masking_guide.
+themselves. Never change __SECRET_MASK_<16 hex>__ placeholders; see masking_guide. Never run secret-mask reveal or ask the user for its output.
 list_rules and get_rule show every detection rule in use; to detect a new kind of secret, try it with
 test_rule, then add it with add_rule (the only tool that writes: it appends a rule to .gitleaks.toml).`
 

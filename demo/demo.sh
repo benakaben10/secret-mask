@@ -72,8 +72,13 @@ step "4. Set up the coding agents found on this machine (here: Claude Code)"
 show "$SM install"
 show "cat $HOME/.claude/settings.json"
 
-step "5. The agent starts a task: the hook blocks the read, next_steps says what to ask the user"
+step "5. The agent starts a task: told at session start, the read and the indexer are blocked"
+say "(the SessionStart hook output the agent gets)"
+printf '{"hook_event_name":"SessionStart","cwd":"%s"}' "$P" | "$SM" hook | sed -e 's/.*"additionalContext":"//' -e 's/","hookEventName.*//'
 read_hook "$P/.env"
+printf '\033[35m[agent] mcp__codebase-memory-mcp__index_repository\033[0m\n'
+printf '{"tool_name":"mcp__codebase-memory-mcp__index_repository","cwd":"%s","tool_input":{"repo_path":"%s"}}' "$P" "$P" |
+  "$SM" hook | sed -e 's/.*"permissionDecisionReason":"//' -e 's/"}}$//' -e 's/\\n/\n/g' | head -2
 mcp next_steps '{}'
 
 step "6. Real secret or local-dev value? The agent cannot see values; review_findings helps it ask you"
@@ -130,7 +135,14 @@ show "git -C $G add .env && git -C $G commit -qm 'add config'; echo exit=\$?"
 show "$SM protect --mode mask --command $SM $G"
 show "git -C $G commit -qm 'add config' && git -C $G --no-pager show HEAD:.env"
 
-step "14. You unseal: the real values come back, edits and moved placeholders included"
+step "14. Only you can see the real values (reveal needs your terminal; an agent's shell is refused)"
+show "$SM reveal $P | cat"
+say "(piped, like an agent's shell: refused. In your own terminal it asks the password, then prints"
+say " file:line, rule, placeholder and the real value.)"
+printf '{"tool_name":"Bash","cwd":"%s","tool_input":{"command":"secret-mask reveal ."}}' "$P" | "$SM" hook |
+  sed -e 's/.*"permissionDecisionReason":"//' -e 's/"}}$//'
+
+step "14b. You unseal: the real values come back, edits and moved placeholders included"
 show "$SM restore --dry-run $P"
 show "$SM restore $P"
 show "cat $P/.env $P/config/slack.env"

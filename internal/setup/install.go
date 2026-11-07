@@ -27,7 +27,8 @@ const Instructions = `## Secrets (secret-mask)
 Secrets in projects on this machine may be masked by secret-mask. Placeholders look like
 ` + "`__SECRET_MASK_<16 hex>__`" + `.
 
-- Start of a task: call the secret-mask MCP tool ` + "`next_steps`" + ` (or run ` + "`secret-mask check <project>`" + `).
+- Start of a task, BEFORE indexing the project or building a code graph with other MCP servers and before
+  reading files: call the secret-mask MCP tool ` + "`next_steps`" + ` (or run ` + "`secret-mask check <project>`" + `).
 - Unmasked secrets (or a read BLOCKED by secret-mask): stop, do not read those files any other way, and ask the
   user to run ` + "`secret-mask mask <project>`" + ` in their terminal. It needs their password: never ask for it or for
   secret values. Continue only after they confirm and ` + "`next_steps`" + ` reports SAFE.
@@ -37,7 +38,7 @@ Secrets in projects on this machine may be masked by secret-mask. Placeholders l
   replacing, re-encoding or inventing one is not.
 - End of a task: ` + "`masking_status`" + ` must report missing: 0, then tell the user how to unseal:
   ` + "`secret-mask restore <project>`" + ` (` + "`--dry-run`" + ` to preview, ` + "`--clean`" + ` to also delete the vault).
-- Never run ` + "`secret-mask mask`" + ` or ` + "`restore`" + ` yourself. ` + "`list_rules`" + ` shows the detection rules; ` + "`test_rule`" + `/` + "`add_rule`" + ` add one.
+- Never run ` + "`secret-mask mask`" + `, ` + "`restore`" + ` or ` + "`reveal`" + ` yourself, nor ask for their output. ` + "`list_rules`" + ` shows the detection rules; ` + "`test_rule`" + `/` + "`add_rule`" + ` add one.
 `
 
 const (
@@ -244,7 +245,8 @@ var clients = []client{
 			}
 			return []edit{
 				e.mcpEdit(userFile, "mcpServers", map[string]any{"type": "stdio"}),
-				e.matcherHookEdit(filepath.Join(e.claudeDir(), "settings.json"), "PreToolUse", hook.Matcher, e.hookCommand(""), hookTimeout),
+				e.matcherHookEdit(filepath.Join(e.claudeDir(), "settings.json"), hookTimeout,
+					hookEntry{"PreToolUse", hook.Matcher, e.hookCommand("")}, hookEntry{"SessionStart", "", e.hookCommand("")}),
 				e.skillEdit(filepath.Join(e.claudeDir(), "skills")),
 			}
 		},
@@ -255,8 +257,9 @@ var clients = []client{
 		edits: func(e *agentEnv) []edit {
 			return []edit{
 				e.codexMCPEdit(filepath.Join(e.codexDir(), "config.toml")),
-				// Codex reads files through its shell tool, so the hook inspects shell commands.
-				e.matcherHookEdit(filepath.Join(e.codexDir(), "hooks.json"), "PreToolUse", "Bash", e.hookCommand(hook.Codex), hookTimeout),
+				// Codex reads files through its shell tool, so the hook inspects shell commands, and MCP calls.
+				e.matcherHookEdit(filepath.Join(e.codexDir(), "hooks.json"), hookTimeout,
+					hookEntry{"PreToolUse", "Bash|mcp__.*", e.hookCommand(hook.Codex)}, hookEntry{"SessionStart", "", e.hookCommand(hook.Codex)}),
 				blockEdit("instructions", filepath.Join(e.codexDir(), "AGENTS.md"), mdStart, mdEnd, Instructions, nil),
 				e.skillEdit(filepath.Join(e.Home, ".agents", "skills")),
 			}
@@ -269,7 +272,7 @@ var clients = []client{
 			settings := filepath.Join(e.Home, ".gemini", "settings.json")
 			return []edit{
 				e.mcpEdit(settings, "mcpServers", nil),
-				e.matcherHookEdit(settings, "BeforeTool", geminiMatcher, e.hookCommand(hook.Gemini), hookTimeout*1000),
+				e.matcherHookEdit(settings, hookTimeout*1000, hookEntry{"BeforeTool", geminiMatcher, e.hookCommand(hook.Gemini)}),
 				blockEdit("instructions", filepath.Join(e.Home, ".gemini", "GEMINI.md"), mdStart, mdEnd, Instructions, nil),
 			}
 		},
@@ -428,17 +431,23 @@ func mcpArgs(argv []string) []any {
 	return append(args, "mcp")
 }
 
-// matcherHookEdit installs {"matcher", "hooks": [{type, command, timeout}]} under hooks.<event>, the
-// format shared by Claude Code, Codex and Gemini CLI.
-func (e *agentEnv) matcherHookEdit(path, event, matcher, command string, timeout int) edit {
+// hookEntry is one hook: event, matcher ("" = every call) and command.
+type hookEntry struct{ event, matcher, command string }
+
+// matcherHookEdit installs {"matcher", "hooks": [{type, command, timeout}]} under hooks.<event> for each
+// entry, the format shared by Claude Code, Codex and Gemini CLI.
+func (e *agentEnv) matcherHookEdit(path string, timeout int, entries ...hookEntry) edit {
 	return edit{
 		kind: "hook", path: path,
 		install: jsonEdit(true, func(doc map[string]any) {
 			removeOurHooks(doc)
-			appendHook(doc, event, map[string]any{
-				"matcher": matcher,
-				"hooks":   []any{map[string]any{"type": "command", "command": command, "timeout": timeout}},
-			})
+			for _, h := range entries {
+				group := map[string]any{"hooks": []any{map[string]any{"type": "command", "command": h.command, "timeout": timeout}}}
+				if h.matcher != "" {
+					group["matcher"] = h.matcher
+				}
+				appendHook(doc, h.event, group)
+			}
 		}),
 		remove: jsonEdit(false, func(doc map[string]any) { removeOurHooks(doc) }),
 	}
@@ -453,7 +462,7 @@ func (e *agentEnv) cursorHookEdit(path string) edit {
 				doc["version"] = 1
 			}
 			removeOurHooks(doc)
-			for _, event := range []string{"beforeReadFile", "beforeShellExecution"} {
+			for _, event := range []string{"beforeReadFile", "beforeShellExecution", "beforeMCPExecution"} {
 				appendHook(doc, event, map[string]any{"command": command})
 			}
 		}),

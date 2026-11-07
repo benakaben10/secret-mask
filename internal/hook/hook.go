@@ -1,6 +1,8 @@
 // Package hook implements the pre-tool hook that blocks AI agents from reading files that still contain
-// unmasked secrets. It understands the hook payloads of Claude Code, Codex CLI, Gemini CLI, Cursor and
-// GitHub Copilot (VS Code and CLI). It fails closed: any error denies the read.
+// unmasked secrets, through their own tools, shell commands or other MCP servers (indexers, graph builders).
+// It understands the hook payloads of Claude Code, Codex CLI, Gemini CLI, Cursor and GitHub Copilot (VS Code
+// and CLI). It fails closed: any error denies the call. At session start it tells the agent to deal with
+// unmasked secrets before anything else.
 package hook
 
 import (
@@ -9,14 +11,16 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 
 	"github.com/benakaben10/secret-mask/internal/detect"
 )
 
-// Matcher is the Claude Code PreToolUse matcher for tools that read file contents.
-const Matcher = "Read|Grep|NotebookRead"
+// Matcher is the Claude Code PreToolUse matcher: the tools that read file contents, the shell, and every
+// MCP tool (other servers may index or upload the project).
+const Matcher = "Read|Grep|NotebookRead|Bash|mcp__.*"
 
 // Clients whose hook payload and output format are supported.
 const (
@@ -31,15 +35,50 @@ const (
 var Clients = []string{Claude, Codex, Gemini, Cursor, Copilot}
 
 // Input is the subset of the hook payloads that is used. Claude Code, Codex, Gemini and Copilot send
-// tool_name + tool_input; Cursor sends file_path or command at the top level.
+// tool_name + tool_input; Cursor sends file_path or command at the top level, and tool_input as a JSON string
+// for MCP calls.
 type Input struct {
-	Cwd            string         `json:"cwd"`
-	HookEventName  string         `json:"hook_event_name"`
-	ToolName       string         `json:"tool_name"`
-	ToolInput      map[string]any `json:"tool_input"`
-	FilePath       string         `json:"file_path"`
-	Command        string         `json:"command"`
-	WorkspaceRoots []string       `json:"workspace_roots"`
+	Cwd            string          `json:"cwd"`
+	HookEventName  string          `json:"hook_event_name"`
+	ToolName       string          `json:"tool_name"`
+	ToolInput      json.RawMessage `json:"tool_input"`
+	FilePath       string          `json:"file_path"`
+	Command        string          `json:"command"`
+	WorkspaceRoots []string        `json:"workspace_roots"`
+
+	args map[string]any // ToolInput as an object
+}
+
+func parseInput(raw []byte) (Input, error) {
+	var in Input
+	if err := json.Unmarshal(raw, &in); err != nil {
+		return in, err
+	}
+	in.args = map[string]any{}
+	if len(in.ToolInput) > 0 && json.Unmarshal(in.ToolInput, &in.args) != nil {
+		var s string
+		if json.Unmarshal(in.ToolInput, &s) == nil {
+			json.Unmarshal([]byte(s), &in.args) // Cursor MCP: a JSON document in a string
+		}
+	}
+	if in.args == nil {
+		in.args = map[string]any{}
+	}
+	return in, nil
+}
+
+func (in Input) root(projectDir string) string {
+	root := projectDir
+	if root == "" && len(in.WorkspaceRoots) > 0 {
+		root = in.WorkspaceRoots[0]
+	}
+	if root == "" {
+		root = in.Cwd
+	}
+	if root == "" {
+		root, _ = os.Getwd()
+	}
+	return root
 }
 
 // Checker returns the unmasked findings for target (relative to root).
@@ -54,28 +93,68 @@ type Decision struct {
 // searchTools search a whole directory when no path is given.
 var searchTools = map[string]bool{"Grep": true, "grep_search": true, "search_file_content": true, "grep": true, "rg": true}
 
+var (
+	// indexTools are MCP tools that read a whole project when given no path (indexers, graph builders,
+	// uploaders); status, query and listing tools are not.
+	indexTools   = regexp.MustCompile(`(?i)index|ingest|scan|embed|crawl|sync|upload|snapshot|build|analy[sz]e`)
+	readOnlyMCPs = regexp.MustCompile(`(?i)status|list|get_|search|query|delete|trace|snippet|schema`)
+	// mcpPathKeys are the arguments MCP tools commonly take a file or project path in.
+	mcpPathKeys = []string{"repo_path", "project_path", "root", "dir", "repo", "file", "workspace"}
+)
+
+func isMCP(in Input) bool {
+	return strings.HasPrefix(in.ToolName, "mcp__") || in.HookEventName == "beforeMCPExecution"
+}
+
+// revealRequested reports a shell command that runs `secret-mask reveal`, which prints real secrets and is
+// for the user's own terminal only.
+func revealRequested(in Input) bool {
+	var cmds []string
+	if in.Command != "" {
+		cmds = append(cmds, in.Command)
+	}
+	switch c := in.args["command"].(type) {
+	case string:
+		cmds = append(cmds, c)
+	case []any:
+		for _, a := range c {
+			if s, ok := a.(string); ok {
+				cmds = append(cmds, s)
+			}
+		}
+	}
+	for _, c := range cmds {
+		words := shellWords(c)
+		for i, w := range words {
+			if b := strings.TrimSuffix(filepath.Base(w), ".exe"); (b == "secret-mask" || strings.HasPrefix(b, "secret-mask_")) &&
+				slices.Contains(words[i+1:], "reveal") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // Evaluate decides whether the tool call may proceed. projectDir is the client's project directory
 // (may be empty); ownFiles are file names never scanned (the vault and the AI guide).
 func Evaluate(raw []byte, projectDir string, ownFiles map[string]bool, check Checker) Decision {
-	var in Input
-	if err := json.Unmarshal(raw, &in); err != nil {
+	in, err := parseInput(raw)
+	if err != nil {
 		return deny("secret-mask hook could not parse its input (%v); reading is blocked to be safe.", err)
 	}
-	root := projectDir
-	if root == "" && len(in.WorkspaceRoots) > 0 {
-		root = in.WorkspaceRoots[0]
+	if revealRequested(in) {
+		return deny("BLOCKED by secret-mask: `secret-mask reveal` prints the real secrets and is only for the user's own " +
+			"terminal. An AI agent must never run it, and must never ask the user to paste its output.")
 	}
-	if root == "" {
-		root = in.Cwd
+	if isMCP(in) && strings.Contains(in.ToolName, "secret-mask") {
+		return Decision{Allow: true} // secret-mask's own tools never return secret values
 	}
-	if root == "" {
-		root, _ = os.Getwd()
-	}
+	root := in.root(projectDir)
 	cwd := in.Cwd
 	if cwd == "" {
 		cwd = root
 	}
-	if dir, ok := in.ToolInput["directory"].(string); ok && dir != "" {
+	if dir, ok := in.args["directory"].(string); ok && dir != "" && !isMCP(in) {
 		cwd = resolve(root, dir) // Gemini's run_shell_command runs in this directory
 	}
 
@@ -119,19 +198,25 @@ func targetsOf(in Input, cwd string) []string {
 		return shellTargets(in.Command, cwd)
 	}
 	var targets []string
-	for _, key := range []string{"file_path", "notebook_path", "path", "filePath", "absolute_path"} {
-		if v, ok := in.ToolInput[key].(string); ok && v != "" {
+	keys := []string{"file_path", "notebook_path", "path", "filePath", "absolute_path"}
+	if isMCP(in) {
+		keys = append(keys, append(mcpPathKeys, "directory")...)
+	}
+	for _, key := range keys {
+		if v, ok := in.args[key].(string); ok && v != "" {
 			targets = append(targets, v)
 		}
 	}
-	if paths, ok := in.ToolInput["paths"].([]any); ok {
-		for _, p := range paths {
-			if s, ok := p.(string); ok && s != "" {
-				targets = append(targets, s)
+	for _, key := range []string{"paths", "files"} {
+		if paths, ok := in.args[key].([]any); ok {
+			for _, p := range paths {
+				if s, ok := p.(string); ok && s != "" {
+					targets = append(targets, s)
+				}
 			}
 		}
 	}
-	switch cmd := in.ToolInput["command"].(type) {
+	switch cmd := in.args["command"].(type) {
 	case string:
 		targets = append(targets, shellTargets(cmd, cwd)...)
 	case []any:
@@ -145,7 +230,38 @@ func targetsOf(in Input, cwd string) []string {
 	if len(targets) == 0 && searchTools[in.ToolName] {
 		targets = []string{"."}
 	}
+	// An MCP indexer called without a path works on the project it was started in.
+	if len(targets) == 0 && isMCP(in) && indexTools.MatchString(in.ToolName) && !readOnlyMCPs.MatchString(in.ToolName) {
+		targets = []string{"."}
+	}
 	return targets
+}
+
+// SessionContext is what the agent is told when a session starts: nothing when the project has no unmasked
+// secret, otherwise to deal with them before any other work (indexing, graph building, reading files).
+func SessionContext(raw []byte, projectDir string, check Checker) string {
+	in, err := parseInput(raw)
+	if err != nil {
+		return ""
+	}
+	root := in.root(projectDir)
+	findings, err := check(root, ".")
+	if err != nil {
+		return fmt.Sprintf("secret-mask could not scan %s for secrets (%v). Before indexing or reading files, call the "+
+			"secret-mask MCP tool next_steps or run `secret-mask check %s`.", root, err, root)
+	}
+	if len(findings) == 0 {
+		return ""
+	}
+	files := map[string]bool{}
+	for _, f := range findings {
+		files[f.File] = true
+	}
+	return fmt.Sprintf("secret-mask: this project has %d unmasked secret(s) in %s. Deal with this BEFORE anything else: "+
+		"before indexing the project or building a code graph (other MCP servers), and before reading files. Tell the "+
+		"user to run `secret-mask mask %s` in their own terminal (it needs their password) and wait for them; the "+
+		"secret-mask MCP tool next_steps has the exact wording. Reads and indexing of these files are blocked until then.",
+		len(findings), strings.Join(slices.Sorted(maps.Keys(files)), ", "), root)
 }
 
 // shellTargets is a best-effort reading of a shell command: every word naming an existing file is a
@@ -330,5 +446,16 @@ func Output(client string, d Decision) []byte {
 		}
 	}
 	out, _ := json.Marshal(v)
+	return out
+}
+
+// SessionOutput renders session-start context in the client's format (nil = nothing to say).
+func SessionOutput(client, context string) []byte {
+	if context == "" || client == Cursor || client == Gemini {
+		return nil
+	}
+	out, _ := json.Marshal(map[string]any{
+		"hookSpecificOutput": map[string]any{"hookEventName": "SessionStart", "additionalContext": context},
+	})
 	return out
 }

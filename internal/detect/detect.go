@@ -118,14 +118,38 @@ func Scan(ctx context.Context, o Options) ([]Finding, error) {
 	}
 
 	out := make([]Finding, 0, len(results))
+	seen := map[string]int{} // file, line, secret -> index in out
 	for _, r := range results {
 		rel, ok := relTo(absRoot, r.File)
 		if !ok || ignored[fmt.Sprintf("%s:%s:%d", rel, r.RuleID, r.StartLine)] {
 			continue
 		}
-		out = append(out, Finding{RuleID: r.RuleID, File: rel, StartLine: r.StartLine, Secret: r.Secret})
+		f := Finding{RuleID: r.RuleID, File: rel, StartLine: r.StartLine, Secret: r.Secret}
+		// One value found by several rules (github-pat and a secret-mask rule) is one finding, reported
+		// under the most specific rule.
+		key := fmt.Sprintf("%s\x00%d\x00%s", rel, r.StartLine, r.Secret)
+		if i, dup := seen[key]; dup {
+			if rulePriority(f.RuleID) < rulePriority(out[i].RuleID) {
+				out[i] = f
+			}
+			continue
+		}
+		seen[key] = len(out)
+		out = append(out, f)
 	}
 	return out, nil
+}
+
+// rulePriority orders rules from most to least specific: provider rules, secret-mask's, generic-api-key.
+func rulePriority(id string) int {
+	switch {
+	case id == "generic-api-key":
+		return 2
+	case strings.HasPrefix(id, "secret-mask-"):
+		return 1
+	default:
+		return 0
+	}
 }
 
 // relFiles walks target like gitleaks' Files source, but gives gitleaks root-relative, slash-separated

@@ -22,6 +22,7 @@ type harness struct {
 	env            map[string]string
 	prompted       []bool // confirm flag of each ReadPassword call
 	promptAnswer   string
+	terminal       bool // what IsTerminal reports
 	stdin          string
 	stdout, stderr bytes.Buffer
 }
@@ -55,6 +56,7 @@ func (h *harness) run(args ...string) int {
 			return h.promptAnswer, nil
 		},
 		Executable: func() (string, error) { return "/usr/local/bin/secret-mask", nil },
+		IsTerminal: func() bool { return h.terminal },
 	}
 	return app.Run(args)
 }

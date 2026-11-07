@@ -2,7 +2,18 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Read|Grep|NotebookRead",
+        "matcher": "Read|Grep|NotebookRead|Bash|mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "secret-mask hook",
+            "timeout": 120
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
         "hooks": [
           {
             "type": "command",

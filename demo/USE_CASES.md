@@ -18,6 +18,8 @@ every case live against a sample project (`demo/demo.sh`; it needs only Docker).
 | 11 | Local development: dev-only values that need not be masked | `review_findings`, allowlists |
 | 12 | Install, upgrade to a new release | `install.sh`, `secret-mask upgrade` |
 | 13 | Tab completion in bash or zsh | `secret-mask completion --install` |
+| 14 | See the real values behind the placeholders (you only) | `secret-mask reveal` |
+| 15 | secret-mask before indexers and code graphs (other MCP servers) | hooks, `SessionStart` |
 
 Exit codes used throughout: `0` ok, `1` error, `2` bad usage, `3` placeholders missing or altered, `4`
 unmasked secrets found, `5` already masked with another vault (refused).
@@ -42,9 +44,10 @@ secret-mask check config/app.json
 
 - Exit `4` when something is unmasked, `0` when clean. Only file, line and rule id are printed, **never the
   value**.
-- Besides gitleaks' token rules, secret-mask's password rules catch values people chose themselves
-  (`DB_PASSWORD=Admin@123`, `postgres://app:Dbpass-77@db/app`, `<password>…</password>`). `${VAR}`,
-  `{{ template }}` and `<placeholder>` values are not reported.
+- Besides gitleaks' token rules, secret-mask's rules catch values people chose themselves
+  (`DB_PASSWORD=Admin@123`, `CLIENT_SECRET=mysecret1`, `postgres://app:Dbpass-77@db/app`,
+  `<password>…</password>`). `${VAR}`, `{{ template }}`, `<placeholder>` and `changeme` values, and keys that
+  name a reference or a setting (`secretName`, `tokenTtl`, `keyFile`), are not reported.
 - Placeholders (`__SECRET_MASK_…__`) are not counted, so a masked tree checks clean.
 
 ## 2. Mask, let someone work, restore
@@ -269,8 +272,8 @@ or, without installing anything:
 **When:** you want to know what is detected, or you have a secret format the rules miss (an in-house token).
 
 ```sh
-secret-mask rules .                          # every rule: 222 gitleaks, 5 secret-mask, your project's
-secret-mask rules --source secret-mask .     # the password rules
+secret-mask rules .                          # every rule: 222 gitleaks, 9 secret-mask, your project's
+secret-mask rules --source secret-mask .     # secret-mask's rules (passwords, secrets, tokens, keys…)
 secret-mask rules --id aws-access-token .    # one rule in full
 ```
 
@@ -417,3 +420,50 @@ secret-mask completion --uninstall zsh
 It adds a marked block to `~/.bashrc` or `~/.zshrc` that loads the script from the installed binary, so it
 follows upgrades. Commands, flags, agent names for `--clients`, `--mode block|mask`, rule sources and paths
 complete. To load it yourself instead: `eval "$(secret-mask completion zsh)"` (zsh: after `compinit`).
+
+## 14. See the real values behind the placeholders
+
+**When:** you need to know which real secret a placeholder stands for, or where a secret ended up, without
+restoring the project.
+
+```sh
+secret-mask reveal .                         # everything
+secret-mask reveal --file config/app.json .  # one file
+secret-mask reveal --id e39bd706e19a4914 .   # one placeholder
+```
+
+```
+These are the REAL secrets. Do not paste them into an AI chat, a ticket or a commit.
+.env:2  aws-access-token  __SECRET_MASK_e39bd706e19a4914__  AKIAQYLPMN5HHHFPZAM2
+config/app.json:3  github-pat  __SECRET_MASK_e9cbe5f120495218__  ghp_8Rk2…
+(missing)  slack-bot-token  __SECRET_MASK_d546f3e8ee66a712__  xoxb-…  masked in: .env
+```
+
+- It only runs in your own interactive terminal and always asks for the password there
+  (`$SECRET_MASK_PASSWORD` is ignored).
+- AI agents cannot use it: no MCP tool, their hooks deny `secret-mask reveal` in a shell command, it refuses to
+  run in an agent's environment or without a terminal, and the skill forbids asking you for its output.
+- `(missing)` lists a placeholder that is no longer in any file, with the files it was masked in.
+
+## 15. secret-mask before indexers and code graphs
+
+**When:** you also use MCP servers that index the project (codebase-memory-mcp and the like). They copy the
+source, secrets included, into their own database, so secret-mask must come first.
+
+- **At session start** the agent is told (`SessionStart` hook, skill, instructions) to deal with unmasked
+  secrets before anything else: no indexing, no graph, no reading until you have masked.
+- **Their tool calls are checked.** With unmasked secrets, a call such as
+  `mcp__codebase-memory-mcp__index_repository` is denied like a read:
+
+  ```
+  BLOCKED by secret-mask: 4 unmasked secret(s) found; this content must not be read until it is masked.
+  Stop the task and ask the user to run this themselves in a terminal (it needs their password), then retry:
+    secret-mask mask /work/api
+  ```
+
+  After masking, the same call goes through and the index holds placeholders only. Query tools
+  (`search_graph`, `index_status`…) are not blocked.
+- **Background indexing cannot be blocked by a hook** (codebase-memory-mcp `auto_index`, `auto_watch`, its
+  daemon). Mask before you open an agent session on the project, keep `auto_index` off for projects with
+  secrets, and if a project was indexed while unmasked, delete that index (`delete_project`) and index again
+  after masking.

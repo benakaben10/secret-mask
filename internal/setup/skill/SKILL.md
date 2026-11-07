@@ -12,8 +12,10 @@ keeps the originals in an encrypted vault (`.secret-mask.vault`). Only the user 
 
 ## Workflow with the user
 
-1. **Start of a task:** call the `next_steps` MCP tool (server `secret-mask`), or run `secret-mask check <project>`
-   (exit 4 = unmasked secrets).
+1. **Start of a task, before anything else:** call the `next_steps` MCP tool (server `secret-mask`), or run
+   `secret-mask check <project>` (exit 4 = unmasked secrets). Do it before indexing the project or building a
+   code graph with another MCP server (codebase-memory-mcp `index_repository` and the like), and before reading
+   files: those tools copy the source, secrets included. The hooks block them while secrets are unmasked.
 2. **Unmasked secrets:** stop the task. Do not read those files in any way. Tell the user to run, in their own
    terminal:
 
@@ -60,8 +62,9 @@ value that works anywhere but the developer's own machine.
 2. Never replace a placeholder with a real-looking, example or empty value, never re-encode it, never invent
    new placeholders, and never try to reconstruct the original secret.
 3. Never edit or delete `.secret-mask.vault` or `SECRET_MASK_AI_GUIDE.md`.
-4. Never run `secret-mask mask` or `secret-mask restore` yourself, never ask for the password, and never ask the
-   user to paste a secret.
+4. Never run `secret-mask mask`, `secret-mask restore` or `secret-mask reveal` yourself, never ask for the
+   password, never ask the user to paste a secret or the output of `secret-mask reveal` (it prints the real
+   values and is for the user's eyes only).
 
 ## When a read is BLOCKED by secret-mask
 

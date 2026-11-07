@@ -23,7 +23,7 @@ func TestRulesListsEverySource(t *testing.T) {
 		sources[r.Source]++
 		byID[r.ID] = r
 	}
-	if sources[SourceGitleaks] < 200 || sources[SourceSecretMask] != 5 || sources[SourceProject] != 1 {
+	if sources[SourceGitleaks] < 200 || sources[SourceSecretMask] != 9 || sources[SourceProject] != 1 {
 		t.Errorf("sources = %v", sources)
 	}
 	aws := byID["aws-access-token"]

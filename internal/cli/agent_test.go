@@ -360,7 +360,7 @@ func TestMCPNextStepsGuidesTheUser(t *testing.T) {
 func TestMCPRuleTools(t *testing.T) {
 	h := newHarness(t, map[string]string{"config/app.env": "T=acme_pr_Q7xT2mZ9vB4nR8wK3sD6fH1j\n"})
 	text, _ := h.tool("list_rules", map[string]any{"source": "secret-mask"})
-	if !strings.Contains(text, "secret-mask-password-unquoted [secret-mask]") || !strings.Contains(text, "of 5 matching") {
+	if !strings.Contains(text, "secret-mask-password-unquoted [secret-mask]") || !strings.Contains(text, "of 9 matching") {
 		t.Errorf("list_rules: %s", text)
 	}
 	if text, _ := h.tool("list_rules", map[string]any{"limit": 10}); !strings.Contains(text, "More: call again with offset=10") || !strings.Contains(text, "Global allowlists") {

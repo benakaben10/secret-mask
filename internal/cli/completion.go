@@ -36,6 +36,8 @@ func completionCommands() []completionCmd {
 			completionFlag{"force", "", "restore what is present"}, completionFlag{"dry-run", "", "show without writing"},
 			completionFlag{"clean", "", "delete the vault and guide"})},
 		{"status", "are all placeholders present", "dir", target},
+		{"reveal", "show the real values and where they are (your terminal only)", "dir", []completionFlag{
+			{"vault", "file", "vault file"}, {"id", "text", "one placeholder"}, {"file", "file", "only this file"}}},
 		{"check", "fail if unmasked secrets", "path", []completionFlag{config, {"root", "dir", "project root"}}},
 		{"rules", "list the detection rules", "dir", []completionFlag{config, {"id", "text", "one rule in full"},
 			{"source", strings.Join([]string{detect.SourceGitleaks, detect.SourceSecretMask, detect.SourceProject}, " "), "rule source"},

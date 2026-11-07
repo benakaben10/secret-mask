@@ -1,15 +1,16 @@
 # secret-mask's own rules, added to every config (built-in or project) unless the config defines a rule
 # with the same id or lists it in [extend] disabledRules.
 #
-# They catch passwords people choose themselves (Admin@123, hunter2…): these have too little entropy for the
-# gitleaks rules, which look for random tokens. They are strict on purpose: a sample value in .env.example is
-# masked too. Only obvious non-values are skipped: variable references, templates, <placeholders>, ***.
+# They catch secrets people choose themselves (Admin@123, hunter2, a hand-made token…) that have too little
+# entropy for the gitleaks rules, which look for random tokens, plus a few formats the gitleaks rules miss.
+# They are strict on purpose: a sample value in .env.example is masked too. Only obvious non-values are
+# skipped: variable references, templates, <placeholders>, ***, booleans, changeme.
 #
 # Paths are matched relative to the project root, with forward slashes.
 
-# Shared skip list for password values (kept identical in every rule below).
+# Shared skip list for values (kept identical in every rule below).
 # - $VAR ${VAR} $(cmd) %VAR% {{ tpl }} <placeholder> ***** xxxx ....
-# - true/false/null/none/nil/undefined, and the bare words password/passwd/pass
+# - true/false/null/none/nil/undefined/required/optional/changeme, and bare key words (password, secret, token…)
 
 [[rules]]
 id = "secret-mask-password-quoted"
@@ -20,7 +21,7 @@ tags = ["password", "secret-mask"]
 [[rules.allowlists]]
 regexes = [
   '''^(?:\$\{?[\w.:-]*\}?|\$\(.*|%[\w.]+%|\{\{.*\}\}|<[^<>]*>|\*+|x{3,}|X{3,}|\.{3,}|-+)$''',
-  '''^(?i:true|false|null|none|nil|undefined|password|passwd|pass)$''',
+  '''^(?i:true|false|null|none|nil|undefined|required|optional|changeme|password|passwd|pass|secret|token|key|api[_-]?key|credentials?)$''',
   '''\s''',
 ]
 
@@ -34,7 +35,7 @@ tags = ["password", "secret-mask"]
 [[rules.allowlists]]
 regexes = [
   '''^(?:\$\{?[\w.:-]*\}?|\$\(.*|%[\w.]+%|\{\{.*\}\}|<[^<>]*>|\*+|x{3,}|X{3,}|\.{3,}|-+)$''',
-  '''^(?i:true|false|null|none|nil|undefined|password|passwd|pass)$''',
+  '''^(?i:true|false|null|none|nil|undefined|required|optional|changeme|password|passwd|pass|secret|token|key|api[_-]?key|credentials?)$''',
   '''^[|>][-+]?$''',
 ]
 
@@ -48,7 +49,7 @@ tags = ["password", "secret-mask"]
 [[rules.allowlists]]
 regexes = [
   '''^(?:\$\{?[\w.:-]*\}?|\$\(.*|%[\w.]+%|\{\{.*\}\}|<[^<>]*>|\*+|x{3,}|X{3,}|\.{3,}|-+)$''',
-  '''^(?i:true|false|null|none|nil|undefined|password|passwd|pass)$''',
+  '''^(?i:true|false|null|none|nil|undefined|required|optional|changeme|password|passwd|pass|secret|token|key|api[_-]?key|credentials?)$''',
 ]
 
 [[rules]]
@@ -61,7 +62,7 @@ tags = ["password", "secret-mask"]
 [[rules.allowlists]]
 regexes = [
   '''^(?:\$\{?[\w.:-]*\}?|\$\(.*|%[\w.]+%|\{\{.*\}\}|<[^<>]*>|\*+|x{3,}|X{3,}|\.{3,}|-+)$''',
-  '''^(?i:true|false|null|none|nil|undefined|password|passwd|pass)$''',
+  '''^(?i:true|false|null|none|nil|undefined|required|optional|changeme|password|passwd|pass|secret|token|key|api[_-]?key|credentials?)$''',
 ]
 
 [[rules]]
@@ -74,5 +75,58 @@ tags = ["password", "secret-mask"]
 [[rules.allowlists]]
 regexes = [
   '''^(?:\$\{?[\w.:-]*\}?|\$\(.*|%[\w.]+%|\{\{.*\}\}|<[^<>]*>|\*+|x{3,}|X{3,}|\.{3,}|-+)$''',
-  '''^(?i:true|false|null|none|nil|undefined|password|passwd|pass)$''',
+  '''^(?i:true|false|null|none|nil|undefined|required|optional|changeme|password|passwd|pass|secret|token|key|api[_-]?key|credentials?)$''',
 ]
+
+[[rules]]
+id = "secret-mask-secret-quoted"
+description = "Secret, token, API key, access key, private key or credential set as a quoted string, in any file, whatever its entropy: client_secret = \"…\", \"apiKey\": \"…\"."
+regex = '''(?i)(?:^|[\s"'`{(,;])(?:export[ \t]+)?["']?[\w.-]{0,40}?(?:secret|token|api[_.-]?key|access[_.-]?key|private[_.-]?key|auth[_.-]?key|credentials?)[\w.-]{0,20}["']?[ \t]*(?::=|=>|=|:)[ \t]*(?:"([^"\r\n]{4,256})"|'([^'\r\n]{4,256})'|`([^`\r\n]{4,256})`)'''
+keywords = ["secret", "token", "key", "credential"]
+tags = ["secret", "secret-mask"]
+[[rules.allowlists]]
+regexes = [
+  '''^(?:\$\{?[\w.:-]*\}?|\$\(.*|%[\w.]+%|\{\{.*\}\}|<[^<>]*>|\*+|x{3,}|X{3,}|\.{3,}|-+)$''',
+  '''^(?i:true|false|null|none|nil|undefined|required|optional|changeme|password|passwd|pass|secret|token|key|api[_-]?key|credentials?)$''',
+  '''^\d+$''',
+  '''\s''',
+]
+[[rules.allowlists]]
+description = "the key names a reference or a setting, not a secret"
+regexTarget = "match"
+regexes = ['''(?i)(?:secret[_.-]?(?:name|ref|key[_.-]?ref|store|provider|path|file|arn|id|length|version)|existing[_.-]?secret|token[_.-]?(?:expir\w*|ttl|type|url|uri|endpoint|path|file|length|limit|name|header|lifetime)|(?:public|key)[_.-]?key\b|key[_.-]?(?:file|path|id|name|alias|size|length|store|type)|credentials?[_.-]?(?:id|name|file|path|provider|type|helper)|pass(?:word)?[_.-]?(?:length|policy|min|max)|csrf)''']
+
+[[rules]]
+id = "secret-mask-secret-unquoted"
+description = "Secret, token, API key, access key, private key or credential set without quotes in a config file, whatever its entropy: CLIENT_SECRET=…, api_key: …."
+regex = '''(?i)(?:^|[\s;])(?:export[ \t]+)?[\w.-]{0,40}?(?:secret|token|api[_.-]?key|access[_.-]?key|private[_.-]?key|auth[_.-]?key|credentials?)[\w.-]{0,20}[ \t]*(?::=|=|:)[ \t]*([^\s"'`#;,]{4,256})'''
+path = '''(?i)(?:^|/)(?:\.env(?:\.[\w.-]+)?|[\w.-]*\.(?:env|ini|cfg|conf|config|properties|toml|ya?ml|tfvars|envrc|npmrc|pypirc|netrc|sh|bash|zsh)|Dockerfile[\w.-]*|docker-compose[\w.-]*)$'''
+keywords = ["secret", "token", "key", "credential"]
+tags = ["secret", "secret-mask"]
+[[rules.allowlists]]
+regexes = [
+  '''^(?:\$\{?[\w.:-]*\}?|\$\(.*|%[\w.]+%|\{\{.*\}\}|<[^<>]*>|\*+|x{3,}|X{3,}|\.{3,}|-+)$''',
+  '''^(?i:true|false|null|none|nil|undefined|required|optional|changeme|password|passwd|pass|secret|token|key|api[_-]?key|credentials?)$''',
+  '''^\d+[a-z]{0,2}$''',
+  '''^[|>][-+]?$''',
+]
+[[rules.allowlists]]
+description = "the key names a reference or a setting, not a secret"
+regexTarget = "match"
+regexes = ['''(?i)(?:secret[_.-]?(?:name|ref|key[_.-]?ref|store|provider|path|file|arn|id|length|version)|existing[_.-]?secret|token[_.-]?(?:expir\w*|ttl|type|url|uri|endpoint|path|file|length|limit|name|header|lifetime)|(?:public|key)[_.-]?key\b|key[_.-]?(?:file|path|id|name|alias|size|length|store|type)|credentials?[_.-]?(?:id|name|file|path|provider|type|helper)|pass(?:word)?[_.-]?(?:length|policy|min|max)|csrf)''']
+
+[[rules]]
+id = "secret-mask-client-credential-map"
+description = "UUID secret mapped from a client id in JSON (clientId -> secret), as in internal authorization maps."
+regex = '''"[\w.-]*[0-9a-fA-F]{4}-[0-9a-fA-F]{4}[\w-]*"\s*:\s*"([0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4,12}){3,})"'''
+secretGroup = 1
+keywords = ["-"]
+tags = ["secret", "secret-mask"]
+
+[[rules]]
+id = "secret-mask-exchangerate-api-key"
+description = "exchangerate-api.com API key in the URL path."
+regex = '''(?i)exchangerate-api\.com/v\d+/([0-9a-z]{16,})'''
+secretGroup = 1
+keywords = ["exchangerate-api"]
+tags = ["api-key", "secret-mask"]
