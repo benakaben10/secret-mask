@@ -1,5 +1,13 @@
 # secret-mask
 
+[![ci](https://github.com/benakaben10/secret-mask/actions/workflows/ci.yml/badge.svg)](https://github.com/benakaben10/secret-mask/actions/workflows/ci.yml)
+[![security](https://github.com/benakaben10/secret-mask/actions/workflows/security.yml/badge.svg)](https://github.com/benakaben10/secret-mask/actions/workflows/security.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/benakaben10/secret-mask/badge)](https://scorecard.dev/viewer/?uri=github.com/benakaben10/secret-mask)
+[![Go Report Card](https://goreportcard.com/badge/github.com/benakaben10/secret-mask)](https://goreportcard.com/report/github.com/benakaben10/secret-mask)
+[![release](https://img.shields.io/github/v/release/benakaben10/secret-mask)](https://github.com/benakaben10/secret-mask/releases/latest)
+[![Go](https://img.shields.io/github/go-mod/go-version/benakaben10/secret-mask)](go.mod)
+[![license](https://img.shields.io/github/license/benakaben10/secret-mask)](LICENSE)
+
 Mask the secrets in a project before AI agents (or anyone) see it, and restore them exactly afterwards.
 
 - **Detects** secrets with [gitleaks](https://github.com/gitleaks/gitleaks), embedded as a library (one
@@ -376,6 +384,14 @@ Report vulnerabilities privately, see [SECURITY.md](SECURITY.md).
   a secret that gitleaks found only after decoding (e.g. base64) is reported as skipped.
 
 ## Development
+
+Every push and pull request runs [ci](.github/workflows/ci.yml) (tests, end-to-end, Trivy image scan) and
+[security](.github/workflows/security.yml): CodeQL (`security-extended`), `govulncheck` (known vulnerabilities
+reachable from the code, standard library included), `gosec`, a secret scan of the repository with
+secret-mask itself ([.gitleaks.toml](.gitleaks.toml) skips the fixtures that hold fake secrets on
+purpose) and, on pull requests, dependency review. [OpenSSF Scorecard](.github/workflows/scorecard.yml)
+grades the supply chain weekly. Findings appear under the repository's Security tab; Dependabot keeps Go
+modules, the Docker base images and the actions up to date.
 
 Only Docker is needed:
 

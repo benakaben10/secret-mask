@@ -11,6 +11,8 @@
 # Shared skip list for values (kept identical in every rule below).
 # - $VAR ${VAR} $(cmd) %VAR% {{ tpl }} <placeholder> ***** xxxx ....
 # - true/false/null/none/nil/undefined/required/optional/changeme, and bare key words (password, secret, token…)
+# Quoted rules also skip environment variable names (SECRET_MASK_PASSWORD); unquoted rules only match a key at
+# the start of a line, as config files write it, so prose and comments are not read as settings.
 
 [[rules]]
 id = "secret-mask-password-quoted"
@@ -22,13 +24,14 @@ tags = ["password", "secret-mask"]
 regexes = [
   '''^(?:\$\{?[\w.:-]*\}?|\$\(.*|%[\w.]+%|\{\{.*\}\}|<[^<>]*>|\*+|x{3,}|X{3,}|\.{3,}|-+)$''',
   '''^(?i:true|false|null|none|nil|undefined|required|optional|changeme|password|passwd|pass|secret|token|key|api[_-]?key|credentials?)$''',
+  '''^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$''',
   '''\s''',
 ]
 
 [[rules]]
 id = "secret-mask-password-unquoted"
-description = "Password set without quotes in a config file: DB_PASSWORD=…, password: …, export PGPASSWORD=…."
-regex = '''(?i)(?:^|[\s;])(?:export[ \t]+)?[\w.-]{0,40}?(?:passw(?:or)?d|passphrase|[_.-]pwd|pwd[_.-]|[_.-]pass|pass[_.-])[\w.-]{0,20}[ \t]*(?::=|=|:)[ \t]*([^\s"'`#;,]{4,128})'''
+description = "Password set without quotes at the start of a line in a config file: DB_PASSWORD=…, password: …, export PGPASSWORD=…."
+regex = '''(?im)^[ \t]*(?:-[ \t]+)?(?:export[ \t]+)?[\w.-]{0,40}?(?:passw(?:or)?d|passphrase|[_.-]pwd|pwd[_.-]|[_.-]pass|pass[_.-])[\w.-]{0,20}[ \t]*(?::=|=|:)[ \t]*([^\s"'`#;,]{4,128})'''
 path = '''(?i)(?:^|/)(?:\.env(?:\.[\w.-]+)?|[\w.-]*\.(?:env|ini|cfg|conf|config|properties|toml|ya?ml|tfvars|envrc|npmrc|pypirc|netrc|sh|bash|zsh)|Dockerfile[\w.-]*|docker-compose[\w.-]*)$'''
 keywords = ["passw", "passphrase", "pwd", "pass"]
 tags = ["password", "secret-mask"]
@@ -89,6 +92,9 @@ regexes = [
   '''^(?:\$\{?[\w.:-]*\}?|\$\(.*|%[\w.]+%|\{\{.*\}\}|<[^<>]*>|\*+|x{3,}|X{3,}|\.{3,}|-+)$''',
   '''^(?i:true|false|null|none|nil|undefined|required|optional|changeme|password|passwd|pass|secret|token|key|api[_-]?key|credentials?)$''',
   '''^\d+$''',
+  '''(?i)^(?:read|write|none|admin|enabled?|disabled?|auto|yes|no|on|off|bearer|basic)$''',
+  '''^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$''',
+  '''(?i)^[a-z]*(?:secret|token|key|credential)[a-z]*(?:[-_.][a-z]+)*$''',
   '''\s''',
 ]
 [[rules.allowlists]]
@@ -98,8 +104,8 @@ regexes = ['''(?i)(?:secret[_.-]?(?:name|ref|key[_.-]?ref|store|provider|path|fi
 
 [[rules]]
 id = "secret-mask-secret-unquoted"
-description = "Secret, token, API key, access key, private key or credential set without quotes in a config file, whatever its entropy: CLIENT_SECRET=…, api_key: …."
-regex = '''(?i)(?:^|[\s;])(?:export[ \t]+)?[\w.-]{0,40}?(?:secret|token|api[_.-]?key|access[_.-]?key|private[_.-]?key|auth[_.-]?key|credentials?)[\w.-]{0,20}[ \t]*(?::=|=|:)[ \t]*([^\s"'`#;,]{4,256})'''
+description = "Secret, token, API key, access key, private key or credential set without quotes at the start of a line in a config file, whatever its entropy: CLIENT_SECRET=…, api_key: …."
+regex = '''(?im)^[ \t]*(?:-[ \t]+)?(?:export[ \t]+)?[\w.-]{0,40}?(?:secret|token|api[_.-]?key|access[_.-]?key|private[_.-]?key|auth[_.-]?key|credentials?)[\w.-]{0,20}[ \t]*(?::=|=|:)[ \t]*([^\s"'`#;,]{4,256})'''
 path = '''(?i)(?:^|/)(?:\.env(?:\.[\w.-]+)?|[\w.-]*\.(?:env|ini|cfg|conf|config|properties|toml|ya?ml|tfvars|envrc|npmrc|pypirc|netrc|sh|bash|zsh)|Dockerfile[\w.-]*|docker-compose[\w.-]*)$'''
 keywords = ["secret", "token", "key", "credential"]
 tags = ["secret", "secret-mask"]
@@ -108,6 +114,7 @@ regexes = [
   '''^(?:\$\{?[\w.:-]*\}?|\$\(.*|%[\w.]+%|\{\{.*\}\}|<[^<>]*>|\*+|x{3,}|X{3,}|\.{3,}|-+)$''',
   '''^(?i:true|false|null|none|nil|undefined|required|optional|changeme|password|passwd|pass|secret|token|key|api[_-]?key|credentials?)$''',
   '''^\d+[a-z]{0,2}$''',
+  '''(?i)^(?:read|write|none|admin|enabled?|disabled?|auto|yes|no|on|off|bearer|basic)$''',
   '''^[|>][-+]?$''',
 ]
 [[rules.allowlists]]

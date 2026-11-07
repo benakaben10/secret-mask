@@ -7,8 +7,16 @@ Please do not open a public issue. Use GitHub's private vulnerability reporting
 
 ## Scope
 
-In scope: vault confidentiality/integrity, restore correctness, the Claude Code hook failing open, and any
-path where a secret value reaches tool output (CLI `check`, hook messages, MCP results).
+In scope: vault confidentiality/integrity, restore correctness, an agent hook failing open, `secret-mask reveal`
+running without the user's terminal, and any path where a secret value reaches tool output (CLI `check`, hook
+messages, MCP results).
 
-Out of scope: secrets gitleaks does not detect (report those to [gitleaks](https://github.com/gitleaks/gitleaks)),
-weak user-chosen passwords, and agents reading files through tools the hook does not cover (e.g. shell commands).
+Out of scope: secrets no rule detects (report missed formats as an issue, or to
+[gitleaks](https://github.com/gitleaks/gitleaks) for its rules), weak user-chosen passwords, shell commands that
+build file paths at run time (the hooks read commands best-effort), and MCP servers that index in the
+background without a tool call.
+
+## Automated checks
+
+CodeQL, govulncheck, gosec, a secret scan, dependency review and OpenSSF Scorecard run in GitHub Actions
+(`.github/workflows/security.yml`, `scorecard.yml`); results are in the Security tab.

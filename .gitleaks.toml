@@ -1,0 +1,8 @@
+# Detection config for this repository: secret-mask (hooks, CLI, MCP, CI secret scan) and gitleaks read it.
+# Every rule stays on; only the fixtures that hold fake secrets on purpose are skipped.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "test, e2e and demo fixtures (fake secrets on purpose)"
+paths = ['''_test\.go$''', '''^test/e2e/''', '''^demo/''']
