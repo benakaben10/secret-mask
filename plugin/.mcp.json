@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "secret-mask": {
+      "type": "stdio",
+      "command": "secret-mask",
+      "args": ["mcp"]
+    }
+  }
+}

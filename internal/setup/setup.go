@@ -1,5 +1,6 @@
-// Package setup wires secret-mask into Claude Code: a PreToolUse hook in settings.json and an MCP
-// server in .mcp.json. Existing settings are preserved and re-running is a no-op.
+// Package setup wires secret-mask into coding agents. Apply configures Claude Code for one project (a
+// PreToolUse hook in settings.json and an MCP server in .mcp.json); Install and Uninstall configure every
+// detected agent for the user (see install.go). Existing settings are preserved and re-running is a no-op.
 package setup
 
 import (

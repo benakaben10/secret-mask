@@ -414,3 +414,54 @@ func TestNew(t *testing.T) {
 		t.Errorf("New() = %+v", a)
 	}
 }
+
+func TestMaskRefusesToMaskTwice(t *testing.T) {
+	h := newHarness(t, files)
+	if code := h.maskAll(); code != ExitOK {
+		t.Fatalf("mask exit %d: %s", code, h.stderr.String())
+	}
+	masked := map[string]string{}
+	for rel := range files {
+		masked[rel] = h.read(rel)
+	}
+	h.write("new.env", "API_TOKEN=fresh-"+"token-123456\n")
+	rep := h.report([2]string{"new.env", "fresh-" + "token-123456"})
+	unchanged := func(when string) {
+		t.Helper()
+		for rel, want := range masked {
+			if got := h.read(rel); got != want {
+				t.Errorf("%s: %s changed", when, rel)
+			}
+		}
+		if got := h.read("new.env"); !strings.Contains(got, "fresh-") {
+			t.Errorf("%s: new.env was masked", when)
+		}
+	}
+
+	// Another vault path: the placeholders on disk are not in it.
+	other := filepath.Join(t.TempDir(), "other.vault")
+	h.prompted = nil
+	if code := h.run("mask", "--report", rep, "--vault", other, h.dir); code != ExitForeign {
+		t.Fatalf("mask with another vault: exit %d\n%s", code, h.stderr.String())
+	}
+	if !strings.Contains(h.stderr.String(), "already masked with another vault") || len(h.prompted) != 0 {
+		t.Errorf("stderr %q, prompted %v", h.stderr.String(), h.prompted)
+	}
+	if _, err := os.Stat(other); !os.IsNotExist(err) {
+		t.Error("a refused mask wrote a vault")
+	}
+	unchanged("--vault other")
+
+	// The vault is gone: masking again would bury the old placeholders under a new vault.
+	os.Remove(filepath.Join(h.dir, DefaultVault))
+	if code := h.run("mask", "--report", rep, h.dir); code != ExitForeign {
+		t.Fatalf("mask without the vault: exit %d", code)
+	}
+	if _, err := os.Stat(filepath.Join(h.dir, DefaultVault)); !os.IsNotExist(err) {
+		t.Error("a refused mask created a vault")
+	}
+	unchanged("vault removed")
+	if code := h.run("mask", "--dry-run", "--report", rep, h.dir); code != ExitForeign {
+		t.Errorf("dry-run must refuse too: exit %d", code)
+	}
+}

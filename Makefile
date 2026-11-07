@@ -18,7 +18,7 @@ binaries: ## static binaries + SHA256SUMS in dist/
 
 e2e: image binaries ## end-to-end tests against the release binary and the image
 	docker run --rm -v "$(CURDIR)/test/e2e:/e2e:ro" -v "$(CURDIR)/dist:/dist:ro" alpine:3.24.3 \
-		sh /e2e/e2e.sh /dist/secret-mask_linux_$(ARCH)
+		sh -c 'apk add --no-cache git >/dev/null && sh /e2e/e2e.sh /dist/secret-mask_linux_$(ARCH)'
 	docker run --rm --entrypoint sh -v "$(CURDIR)/test/e2e:/e2e:ro" $(IMAGE) \
 		/e2e/e2e.sh /usr/local/bin/secret-mask
 

@@ -1,12 +1,16 @@
 package cli
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
+	"slices"
 	"strings"
 
 	"github.com/benakaben10/secret-mask/internal/detect"
@@ -18,22 +22,27 @@ import (
 	"github.com/benakaben10/secret-mask/internal/version"
 )
 
-// hook runs as a Claude Code PreToolUse hook: JSON on stdin, decision JSON on stdout, always exit 0.
+// hook runs as an agent's pre-tool hook: JSON on stdin, decision JSON on stdout, always exit 0.
 func (a *App) hook(ctx context.Context, args []string) error {
 	fs := a.flagSet("hook")
 	config := fs.String("config", "", "gitleaks config (default: $GITLEAKS_CONFIG, then <project>/.gitleaks.toml)")
+	client := fs.String("client", hook.Claude, "hook format: "+strings.Join(hook.Clients, ", "))
 	if err := parseFlags(fs, args); err != nil {
 		return err
+	}
+	if !slices.Contains(hook.Clients, *client) {
+		return &UsageError{fmt.Sprintf("unknown --client %q (%s)", *client, strings.Join(hook.Clients, ", "))}
 	}
 	raw, err := io.ReadAll(a.Stdin)
 	if err != nil {
 		raw = nil // Evaluate denies unparseable input
 	}
 	own := map[string]bool{DefaultVault: true, guide.DefaultName: true}
-	d := hook.Evaluate(raw, a.Getenv("CLAUDE_PROJECT_DIR"), own, func(root, rel string) ([]detect.Finding, error) {
+	projectDir := cmp.Or(a.Getenv("CLAUDE_PROJECT_DIR"), a.Getenv("GEMINI_PROJECT_DIR"))
+	d := hook.Evaluate(raw, projectDir, own, func(root, rel string) ([]detect.Finding, error) {
 		return checkPath(ctx, root, filepath.Join(root, rel), *config)
 	})
-	if out := hook.Output(d); out != nil {
+	if out := hook.Output(*client, d); out != nil {
 		fmt.Fprintln(a.Stdout, string(out))
 	}
 	return nil
@@ -143,6 +152,77 @@ func inRoot(root string, raw json.RawMessage) (string, error) {
 		return "", err
 	}
 	return p, nil
+}
+
+// install configures every detected coding agent (or those named by --clients) for the user.
+func (a *App) install(args []string, install bool) error {
+	name := map[bool]string{true: "install", false: "uninstall"}[install]
+	fs := a.flagSet(name)
+	clients := fs.String("clients", "", "comma-separated clients ("+strings.Join(setup.ClientIDs(), ", ")+"); default: "+
+		map[bool]string{true: "every detected one", false: "all"}[install])
+	dryRun := fs.Bool("dry-run", false, "show what would change without writing")
+	var command *string
+	var noHooks, force *bool
+	if install {
+		command = fs.String("command", "", `command written into the configs (default: this executable), e.g. "docker run --rm -i IMAGE"`)
+		noHooks = fs.Bool("no-hooks", false, "do not install the read-blocking hooks (and remove ones installed before)")
+		force = fs.Bool("force", false, "replace a skill or hook file that secret-mask did not write")
+	}
+	if err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	if fs.NArg() > 0 {
+		return &UsageError{name + " takes no arguments, got: " + strings.Join(fs.Args(), " ")}
+	}
+	home, _ := os.UserHomeDir()
+	if h := a.Getenv("HOME"); h != "" {
+		home = h
+	}
+	o := setup.InstallOptions{
+		Home: home, Getenv: a.Getenv, GOOS: runtime.GOOS, DryRun: *dryRun,
+		LookPath: func(n string) bool { _, err := exec.LookPath(n); return err == nil },
+	}
+	if *clients != "" {
+		o.Clients = strings.Split(strings.ReplaceAll(*clients, " ", ""), ",")
+	}
+	var rep *setup.Report
+	var err error
+	if install {
+		o.NoHooks, o.Force = *noHooks, *force
+		o.Command = strings.Fields(*command)
+		if len(o.Command) == 0 {
+			exe, xerr := a.Executable()
+			if xerr != nil {
+				exe = "secret-mask"
+			}
+			o.Command = []string{exe}
+		}
+		rep, err = setup.Install(o)
+	} else {
+		rep, err = setup.Uninstall(o)
+	}
+	if rep == nil {
+		return &UsageError{err.Error()}
+	}
+	if len(rep.Clients) == 0 {
+		fmt.Fprintf(a.Stdout, "No supported coding agent found. Pick some with --clients (%s).\n", strings.Join(setup.ClientIDs(), ", "))
+		return err
+	}
+	last := ""
+	for _, c := range rep.Changes {
+		if c.Client != last {
+			fmt.Fprintf(a.Stdout, "%s:\n", c.Client)
+			last = c.Client
+		}
+		fmt.Fprintf(a.Stdout, "  %-13s %s (%s)\n", c.Kind+":", c.Path, c.Status)
+	}
+	if install && !*dryRun && err == nil {
+		fmt.Fprintln(a.Stdout, "\nRestart your coding agents to load secret-mask.")
+		if slices.Contains(rep.Clients, "Codex CLI") && !*noHooks {
+			fmt.Fprintln(a.Stdout, "Codex CLI: review and trust the new hook with /hooks.")
+		}
+	}
+	return err
 }
 
 func (a *App) setup(args []string) error {

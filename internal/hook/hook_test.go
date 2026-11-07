@@ -144,7 +144,7 @@ func TestFailsClosed(t *testing.T) {
 }
 
 func TestOutput(t *testing.T) {
-	if Output(Decision{Allow: true}) != nil {
+	if Output(Claude, Decision{Allow: true}) != nil {
 		t.Error("allow must produce no output")
 	}
 	var got struct {
@@ -152,11 +152,104 @@ func TestOutput(t *testing.T) {
 			HookEventName, PermissionDecision, PermissionDecisionReason string
 		} `json:"hookSpecificOutput"`
 	}
-	if err := json.Unmarshal(Output(Decision{Reason: "why"}), &got); err != nil {
+	if err := json.Unmarshal(Output(Claude, Decision{Reason: "why"}), &got); err != nil {
 		t.Fatal(err)
 	}
 	h := got.HookSpecificOutput
 	if h.HookEventName != "PreToolUse" || h.PermissionDecision != "deny" || h.PermissionDecisionReason != "why" {
 		t.Errorf("output = %+v", h)
+	}
+}
+
+func TestShellCommands(t *testing.T) {
+	dir := project(t)
+	os.WriteFile(filepath.Join(dir, "sub", "leak.env"), []byte("x"), 0o644)
+	leaky := map[string]bool{"leak.env": true}
+	tests := []struct {
+		name    string
+		command any
+		allow   bool
+		targets []string
+	}{
+		{"cat a leaky file", "cat leak.env", false, []string{"leak.env"}},
+		{"redirect without spaces", "wc -l<leak.env", false, []string{"leak.env"}},
+		{"quoted path", `sed -n 1p "sub/leak.env"`, false, []string{"sub/leak.env"}},
+		{"flag value", "tool --input=leak.env", false, []string{"leak.env"}},
+		{"glob", "head *.env", false, []string{"leak.env"}},
+		{"argv from Codex", []any{"bash", "-lc", "cat clean.txt && cat leak.env"}, false, []string{"clean.txt", "leak.env"}},
+		{"clean file", "cat clean.txt", true, []string{"clean.txt"}},
+		{"listing a directory is not reading it", "ls sub", true, nil},
+		{"recursive grep with no path scans cwd", "grep -rn password", false, []string{"."}},
+		{"rg in a directory scans it", "rg password sub", true, []string{"sub"}},
+		{"plain grep on stdin", "ps aux | grep node", true, nil},
+		{"variables are not expanded", "cat $FILE", true, nil},
+		{"no paths", "go version", true, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var calls []call
+			d := Evaluate(input("Bash", map[string]any{"command": tt.command}, dir), dir, own, fake(leaky, nil, &calls))
+			if d.Allow != tt.allow {
+				t.Errorf("allow = %v: %s", d.Allow, d.Reason)
+			}
+			var got []string
+			for _, c := range calls {
+				got = append(got, c.target)
+			}
+			if strings.Join(got, ",") != strings.Join(tt.targets, ",") {
+				t.Errorf("scanned %v, want %v", got, tt.targets)
+			}
+		})
+	}
+}
+
+func TestClientPayloads(t *testing.T) {
+	dir := project(t)
+	leaky := map[string]bool{"leak.env": true}
+	leak := filepath.Join(dir, "leak.env")
+	cursorRead, _ := json.Marshal(map[string]any{"hook_event_name": "beforeReadFile", "file_path": leak, "workspace_roots": []string{dir}})
+	cursorShell, _ := json.Marshal(map[string]any{"hook_event_name": "beforeShellExecution", "command": "cat leak.env", "cwd": dir})
+	tests := []struct {
+		name string
+		raw  []byte
+	}{
+		{"gemini read_file", input("read_file", map[string]any{"file_path": leak}, dir)},
+		{"gemini read_file (absolute_path)", input("read_file", map[string]any{"absolute_path": leak}, dir)},
+		{"gemini read_many_files", input("read_many_files", map[string]any{"paths": []any{"clean.txt", "leak.env"}}, dir)},
+		{"gemini search without path", input("search_file_content", map[string]any{"pattern": "x"}, dir)},
+		{"gemini shell in a directory", input("run_shell_command", map[string]any{"command": "cat leak.env", "directory": "."}, dir)},
+		{"copilot read_file", input("read_file", map[string]any{"filePath": leak}, dir)},
+		{"cursor beforeReadFile", cursorRead},
+		{"cursor beforeShellExecution", cursorShell},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var calls []call
+			if d := Evaluate(tt.raw, "", own, fake(leaky, nil, &calls)); d.Allow {
+				t.Errorf("allowed, calls %+v", calls)
+			}
+		})
+	}
+}
+
+func TestClientOutputs(t *testing.T) {
+	deny := Decision{Reason: "why"}
+	var gem map[string]string
+	json.Unmarshal(Output(Gemini, deny), &gem)
+	if gem["decision"] != "deny" || gem["reason"] != "why" || Output(Gemini, Decision{Allow: true}) != nil {
+		t.Errorf("gemini = %v", gem)
+	}
+	var cur map[string]string
+	json.Unmarshal(Output(Cursor, deny), &cur)
+	if cur["permission"] != "deny" || cur["agent_message"] != "why" {
+		t.Errorf("cursor deny = %v", cur)
+	}
+	if string(Output(Cursor, Decision{Allow: true})) != `{"permission":"allow"}` {
+		t.Errorf("cursor allow = %s", Output(Cursor, Decision{Allow: true}))
+	}
+	for _, c := range []string{Codex, Copilot} {
+		if !strings.Contains(string(Output(c, deny)), `"permissionDecision":"deny"`) {
+			t.Errorf("%s uses the Claude Code format: %s", c, Output(c, deny))
+		}
 	}
 }
