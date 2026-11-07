@@ -11,7 +11,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/OWNER/secret-mask/internal/detect"
+	"github.com/benakaben10/secret-mask/internal/detect"
 )
 
 // Matcher is the PreToolUse matcher for tools that read file contents.

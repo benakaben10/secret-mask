@@ -9,13 +9,13 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/OWNER/secret-mask/internal/detect"
-	"github.com/OWNER/secret-mask/internal/guide"
-	"github.com/OWNER/secret-mask/internal/hook"
-	"github.com/OWNER/secret-mask/internal/mcp"
-	"github.com/OWNER/secret-mask/internal/setup"
-	"github.com/OWNER/secret-mask/internal/vault"
-	"github.com/OWNER/secret-mask/internal/version"
+	"github.com/benakaben10/secret-mask/internal/detect"
+	"github.com/benakaben10/secret-mask/internal/guide"
+	"github.com/benakaben10/secret-mask/internal/hook"
+	"github.com/benakaben10/secret-mask/internal/mcp"
+	"github.com/benakaben10/secret-mask/internal/setup"
+	"github.com/benakaben10/secret-mask/internal/vault"
+	"github.com/benakaben10/secret-mask/internal/version"
 )
 
 // hook runs as a Claude Code PreToolUse hook: JSON on stdin, decision JSON on stdout, always exit 0.

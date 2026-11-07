@@ -10,7 +10,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/OWNER/secret-mask/internal/fsutil"
+	"github.com/benakaben10/secret-mask/internal/fsutil"
 )
 
 const maxFileSize = 100 << 20

@@ -16,7 +16,7 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-ENV CGO_ENABLED=0 LDFLAGS="-s -w -X github.com/OWNER/secret-mask/internal/version.Version=${VERSION}"
+ENV CGO_ENABLED=0 LDFLAGS="-s -w -X github.com/benakaben10/secret-mask/internal/version.Version=${VERSION}"
 RUN GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags "$LDFLAGS" -o /out/secret-mask ./cmd/secret-mask
 
 FROM build AS test

@@ -7,7 +7,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/OWNER/secret-mask/internal/vault"
+	"github.com/benakaben10/secret-mask/internal/vault"
 )
 
 // DefaultName is the guide file written next to the vault.

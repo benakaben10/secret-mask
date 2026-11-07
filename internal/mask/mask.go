@@ -9,8 +9,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/OWNER/secret-mask/internal/detect"
-	"github.com/OWNER/secret-mask/internal/fsutil"
+	"github.com/benakaben10/secret-mask/internal/detect"
+	"github.com/benakaben10/secret-mask/internal/fsutil"
 )
 
 // Options control Mask and Restore.

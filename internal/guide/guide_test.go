@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/OWNER/secret-mask/internal/vault"
+	"github.com/benakaben10/secret-mask/internal/vault"
 )
 
 func TestRender(t *testing.T) {

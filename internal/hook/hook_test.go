@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/OWNER/secret-mask/internal/detect"
+	"github.com/benakaben10/secret-mask/internal/detect"
 )
 
 type call struct{ root, target string }

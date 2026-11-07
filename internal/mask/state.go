@@ -5,7 +5,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/OWNER/secret-mask/internal/vault"
+	"github.com/benakaben10/secret-mask/internal/vault"
 )
 
 // State is the decrypted vault content plus lookup indexes.

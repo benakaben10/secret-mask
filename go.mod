@@ -1,4 +1,4 @@
-module github.com/OWNER/secret-mask
+module github.com/benakaben10/secret-mask
 
 go 1.27.3
 

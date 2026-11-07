@@ -14,16 +14,16 @@ Mask the secrets in a project before AI agents (or anyone) see it, and restore t
 ## Install
 
 **Binary** — download `secret-mask_<os>_<arch>` from the
-[latest release](https://github.com/OWNER/secret-mask/releases/latest), check it against `SHA256SUMS`,
+[latest release](https://github.com/benakaben10/secret-mask/releases/latest), check it against `SHA256SUMS`,
 make it executable and put it on `PATH`. Builds: linux/darwin (amd64, arm64), windows/amd64.
 
 **Docker** (linux/amd64, linux/arm64)
 
 ```sh
-docker run --rm -it -u "$(id -u):$(id -g)" -v "$PWD:/work" ghcr.io/OWNER/secret-mask:latest check
+docker run --rm -it -u "$(id -u):$(id -g)" -v "$PWD:/work" ghcr.io/benakaben10/secret-mask:latest check
 ```
 
-**Go**: `go install github.com/OWNER/secret-mask/cmd/secret-mask@latest`
+**Go**: `go install github.com/benakaben10/secret-mask/cmd/secret-mask@latest`
 
 **From source** (needs only Docker): `make binaries` → `dist/`, `make image` → `secret-mask:dev`.
 

@@ -1,15 +1,17 @@
 #!/bin/sh
-# Point the module path and docs at the real GitHub repository. Usage: scripts/set-owner.sh owner/repo
+# Move the project to another GitHub repository: rewrites the Go module path and the
+# github.com / ghcr.io references. Usage: scripts/set-owner.sh owner/repo
 set -eu
 REPO=${1:?usage: scripts/set-owner.sh owner/repo}
 case "$REPO" in */*) ;; *) echo "expected owner/repo" >&2; exit 2 ;; esac
 cd "$(dirname "$0")/.."
-OLD=$(sed -n 's/^module //p' go.mod)
-NEW="github.com/$REPO"
-OWNER=${REPO%/*}
-# Go sources, go.mod, Dockerfile, docs: module path, then remaining OWNER/secret-mask references (ghcr, URLs).
+OLD=$(sed -n 's/^module //p' go.mod)   # github.com/<old-owner>/<old-repo>
+OLD_REPO=${OLD#github.com/}
+OLD_OWNER=${OLD_REPO%/*}
+NEW_OWNER=${REPO%/*}
 for f in $(git ls-files 2>/dev/null || find . -type f -not -path './.git/*'); do
+  [ "$f" = scripts/set-owner.sh ] && continue
   case "$(basename "$f")" in *.go|go.mod|Dockerfile|*.md|*.sh|*.yml) ;; *) continue ;; esac
-  sed -i.bak -e "s#$OLD#$NEW#g" -e "s#ghcr.io/OWNER/#ghcr.io/$OWNER/#g" -e "s#github.com/OWNER/secret-mask#$NEW#g" "$f" && rm -f "$f.bak"
+  sed -i.bak -e "s#github.com/$OLD_REPO#github.com/$REPO#g" -e "s#ghcr.io/$OLD_OWNER/#ghcr.io/$NEW_OWNER/#g" "$f" && rm -f "$f.bak"
 done
-echo "module path: $OLD -> $NEW"
+echo "github.com/$OLD_REPO -> github.com/$REPO"

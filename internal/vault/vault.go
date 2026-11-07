@@ -17,7 +17,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/OWNER/secret-mask/internal/fsutil"
+	"github.com/benakaben10/secret-mask/internal/fsutil"
 )
 
 const (

@@ -3,7 +3,7 @@ package mask
 import (
 	"strings"
 
-	"github.com/OWNER/secret-mask/internal/detect"
+	"github.com/benakaben10/secret-mask/internal/detect"
 )
 
 // Unmasked drops findings whose "secret" is (or contains) a placeholder: a masked value such as

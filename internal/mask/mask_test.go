@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/OWNER/secret-mask/internal/detect"
-	"github.com/OWNER/secret-mask/internal/fsutil"
-	"github.com/OWNER/secret-mask/internal/vault"
+	"github.com/benakaben10/secret-mask/internal/detect"
+	"github.com/benakaben10/secret-mask/internal/fsutil"
+	"github.com/benakaben10/secret-mask/internal/vault"
 )
 
 // tree writes files (slash paths) under a temp dir and returns it.

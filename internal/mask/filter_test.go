@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/OWNER/secret-mask/internal/detect"
+	"github.com/benakaben10/secret-mask/internal/detect"
 )
 
 func TestUnmasked(t *testing.T) {

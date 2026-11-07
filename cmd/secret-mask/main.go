@@ -5,7 +5,7 @@ package main
 import (
 	"os"
 
-	"github.com/OWNER/secret-mask/internal/cli"
+	"github.com/benakaben10/secret-mask/internal/cli"
 )
 
 func main() {

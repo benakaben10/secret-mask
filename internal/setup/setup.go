@@ -10,8 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/OWNER/secret-mask/internal/fsutil"
-	"github.com/OWNER/secret-mask/internal/hook"
+	"github.com/benakaben10/secret-mask/internal/fsutil"
+	"github.com/benakaben10/secret-mask/internal/hook"
 )
 
 // ServerName is the MCP server key.

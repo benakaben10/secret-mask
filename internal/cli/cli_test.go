@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/OWNER/secret-mask/internal/guide"
-	"github.com/OWNER/secret-mask/internal/mask"
-	"github.com/OWNER/secret-mask/internal/version"
+	"github.com/benakaben10/secret-mask/internal/guide"
+	"github.com/benakaben10/secret-mask/internal/mask"
+	"github.com/benakaben10/secret-mask/internal/version"
 )
 
 const pw = "test-password-1"
