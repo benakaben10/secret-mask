@@ -56,6 +56,21 @@ follows upgrades.
 [latest release](https://github.com/benakaben10/secret-mask/releases/latest), check it against `SHA256SUMS`,
 make it executable and put it on `PATH`. Builds: linux/darwin (amd64, arm64), windows/amd64.
 
+**Verify a release** (from v0.3.2). The release workflow signs `SHA256SUMS` with Sigstore (keyless: the
+certificate names the workflow and the tag) and publishes SLSA build provenance for every binary and for the
+image. `install.sh` checks the signature by itself when `cosign` is installed.
+
+```sh
+cosign verify-blob --bundle SHA256SUMS.sigstore.json \
+  --certificate-identity-regexp '^https://github.com/benakaben10/secret-mask/\.github/workflows/release\.yml@refs/tags/v' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com SHA256SUMS
+sha256sum --check --ignore-missing SHA256SUMS                       # then the binary against the list
+gh attestation verify secret-mask_linux_amd64 --repo benakaben10/secret-mask   # build provenance
+cosign verify ghcr.io/benakaben10/secret-mask:latest \
+  --certificate-identity-regexp '^https://github.com/benakaben10/secret-mask/' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
 **Docker** (linux/amd64, linux/arm64)
 
 ```sh

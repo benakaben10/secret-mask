@@ -2,3 +2,4 @@ internal/cli/cli.go:secret-mask-password-quoted:28
 .github/workflows/scorecard.yml:secret-mask-secret-unquoted:18
 install.sh:secret-mask-secret-unquoted:2
 internal/detect/rules.go:secret-mask-secret-quoted:23
+.github/workflows/release.yml:secret-mask-secret-unquoted:16

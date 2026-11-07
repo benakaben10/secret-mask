@@ -345,6 +345,19 @@ if command -v httpd >/dev/null 2>&1 && command -v curl >/dev/null 2>&1 && [ -f "
   has "$W/out" "Claude Code:" "agent configuration refreshed"
   run 0 "upgraded binary runs" "$W/ubin/secret-mask" version
   has "$W/out" "(gitleaks v8." "the old binary was replaced"
+  # Signed release: a cosign that accepts the bundle installs, one that rejects it stops the install.
+  echo '{}' >"$REL/SHA256SUMS.sigstore.json"
+  mkdir -p "$W/cosign-ok" "$W/cosign-bad"
+  printf '#!/bin/sh\nexit 0\n' >"$W/cosign-ok/cosign"
+  printf '#!/bin/sh\nexit 1\n' >"$W/cosign-bad/cosign"
+  chmod 755 "$W/cosign-ok/cosign" "$W/cosign-bad/cosign"
+  run 0 "install.sh verifies the Sigstore signature" env HOME="$W/uhome" PATH="$W/cosign-ok:$W/ubin:$PATH" SECRET_MASK_DOWNLOAD_URL=http://127.0.0.1:18080 sh "$INSTALLER" --skip-config
+  has "$W/out" "Signature verified" "signature checked when cosign is installed"
+  run 1 "install.sh refuses a bad signature" env HOME="$W/uhome" PATH="$W/cosign-bad:$W/ubin:$PATH" SECRET_MASK_DOWNLOAD_URL=http://127.0.0.1:18080 sh "$INSTALLER" --skip-config
+  has "$W/out" "does not verify" "bad signature reported"
+  rm "$REL/SHA256SUMS.sigstore.json"
+  run 0 "install.sh accepts an unsigned release" env HOME="$W/uhome" PATH="$W/cosign-ok:$W/ubin:$PATH" SECRET_MASK_DOWNLOAD_URL=http://127.0.0.1:18080 sh "$INSTALLER" --skip-config
+  has "$W/out" "not signed" "unsigned release noted"
   echo "0000000000000000000000000000000000000000000000000000000000000000  secret-mask_linux_$A" >"$REL/SHA256SUMS"
   run 1 "install.sh refuses a checksum mismatch" env HOME="$W/uhome" PATH="$W/ubin:$PATH" SECRET_MASK_DOWNLOAD_URL=http://127.0.0.1:18080 sh "$INSTALLER" --skip-config
   has "$W/out" "CHECKSUM MISMATCH" "mismatch reported"

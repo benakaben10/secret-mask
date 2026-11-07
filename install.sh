@@ -15,6 +15,8 @@
 #   --no-hooks         configure agents without the read-blocking hooks
 #   --skip-config      install the binary only, no agent configuration
 #
+# With cosign installed, the Sigstore signature of SHA256SUMS is verified too.
+#
 # Environment: SECRET_MASK_DOWNLOAD_URL overrides the release download URL (HTTPS, or http://localhost
 # for tests).
 set -eu
@@ -37,7 +39,7 @@ main() {
       --clients=*) CLIENTS=${1#--clients=}; shift ;;
       --no-hooks) NO_HOOKS=true; shift ;;
       --skip-config) SKIP_CONFIG=true; shift ;;
-      -h|--help) sed -n '2,20p' "$0" 2>/dev/null || echo "see https://github.com/$REPO#install"; exit 0 ;;
+      -h|--help) sed -n '2,21p' "$0" 2>/dev/null || echo "see https://github.com/$REPO#install"; exit 0 ;;
       *) echo "install.sh: unknown option '$1' (see --help)" >&2; exit 2 ;;
     esac
   done
@@ -98,6 +100,20 @@ main() {
   trap 'rm -rf "$TMP"' EXIT
   download "$BASE/$ASSET" "$TMP/$ASSET"
   download "$BASE/SHA256SUMS" "$TMP/SHA256SUMS"
+
+  # Releases are signed with Sigstore (keyless, by the release workflow). With cosign installed the
+  # signature of SHA256SUMS must verify; older releases have none and rely on the checksum alone.
+  if command -v cosign >/dev/null 2>&1; then
+    if download "$BASE/SHA256SUMS.sigstore.json" "$TMP/SHA256SUMS.sigstore.json" 2>/dev/null; then
+      cosign verify-blob --bundle "$TMP/SHA256SUMS.sigstore.json" \
+        --certificate-identity-regexp "^https://github.com/$REPO/\.github/workflows/release\.yml@refs/tags/v" \
+        --certificate-oidc-issuer https://token.actions.githubusercontent.com "$TMP/SHA256SUMS" >/dev/null 2>&1 ||
+        { echo "error: the signature of SHA256SUMS does not verify" >&2; exit 1; }
+      echo "Signature verified (Sigstore, $REPO release workflow)."
+    else
+      echo "note: this release is not signed; relying on the checksum"
+    fi
+  fi
 
   # The checksum is mandatory: no published digest, no install.
   EXPECTED=$(awk -v f="$ASSET" '$2 == f || $2 == "*" f { print tolower($1) }' "$TMP/SHA256SUMS")
