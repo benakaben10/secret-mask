@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/benakaben10/secret-mask/internal/fsutil"
 )
@@ -146,7 +147,7 @@ func Open(v *Vault, password string) (*Payload, error) {
 
 // Read loads a vault file.
 func Read(path string) (*Vault, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		return nil, err
 	}

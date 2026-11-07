@@ -36,8 +36,15 @@ func (h Hit) IDs() []string {
 // Scan walks dir (skipping .git, symlinks, binaries, files over 100 MiB and opt.Skip) and returns the
 // files containing placeholders.
 func Scan(dir string, skip map[string]bool) ([]Hit, error) {
+	// Files are read through a root-scoped handle, so a symlink swapped in during the walk cannot lead the
+	// read outside dir.
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
 	var hits []Hit
-	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+	err = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -50,11 +57,11 @@ func Scan(dir string, skip map[string]bool) ([]Hit, error) {
 		if !d.Type().IsRegular() {
 			return nil
 		}
-		rel, err := filepath.Rel(dir, path)
+		osRel, err := filepath.Rel(dir, path)
 		if err != nil {
 			return err
 		}
-		rel = filepath.ToSlash(rel)
+		rel := filepath.ToSlash(osRel)
 		if skip[rel] {
 			return nil
 		}
@@ -62,7 +69,7 @@ func Scan(dir string, skip map[string]bool) ([]Hit, error) {
 		if err != nil || info.Size() > maxFileSize {
 			return nil
 		}
-		data, err := os.ReadFile(path)
+		data, err := root.ReadFile(osRel)
 		if err != nil {
 			return err
 		}

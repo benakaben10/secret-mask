@@ -34,7 +34,7 @@ func reviewFindings(ctx context.Context, root, config, path string) (string, err
 	lines := map[string][]string{}
 	for _, f := range findings {
 		if _, ok := lines[f.File]; !ok {
-			data, _ := os.ReadFile(filepath.Join(root, filepath.FromSlash(f.File)))
+			data, _ := os.ReadFile(filepath.Clean(filepath.Join(root, filepath.FromSlash(f.File))))
 			lines[f.File] = strings.Split(string(data), "\n")
 		}
 	}

@@ -109,7 +109,7 @@ func maskFile(dir, rel string, secrets map[string]string, s *State, dryRun bool,
 		res.Skipped = append(res.Skipped, rel+": not a regular file")
 		return 0, nil
 	}
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		return 0, err
 	}

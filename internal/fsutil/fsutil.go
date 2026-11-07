@@ -19,11 +19,11 @@ func WriteFileAtomic(path string, data []byte, perm fs.FileMode) error {
 	}
 	defer os.Remove(tmp.Name())
 	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
+		_ = tmp.Close() // the write error is the one to report
 		return err
 	}
 	if err := tmp.Chmod(perm); err != nil {
-		tmp.Close()
+		_ = tmp.Close() // the write error is the one to report
 		return err
 	}
 	if err := tmp.Close(); err != nil {

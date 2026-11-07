@@ -58,7 +58,7 @@ func parseInput(raw []byte) (Input, error) {
 	if len(in.ToolInput) > 0 && json.Unmarshal(in.ToolInput, &in.args) != nil {
 		var s string
 		if json.Unmarshal(in.ToolInput, &s) == nil {
-			json.Unmarshal([]byte(s), &in.args) // Cursor MCP: a JSON document in a string
+			_ = json.Unmarshal([]byte(s), &in.args) // Cursor MCP: a JSON document in a string; not JSON = no arguments
 		}
 	}
 	if in.args == nil {

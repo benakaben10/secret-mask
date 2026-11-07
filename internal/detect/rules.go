@@ -74,7 +74,7 @@ func Rules(root, config string) (*RuleSet, error) {
 	}
 	own := map[string]bool{}
 	if path != "" {
-		data, err := os.ReadFile(path)
+		data, err := os.ReadFile(filepath.Clean(path))
 		if err != nil {
 			return nil, err
 		}
@@ -308,7 +308,7 @@ func AddRule(root string, spec RuleSpec) (string, error) {
 		return "", fmt.Errorf("rule %q already exists; pick another id (existing rules cannot be changed this way)", spec.ID)
 	}
 	block, _ := spec.TOML()
-	old, err := os.ReadFile(path)
+	old, err := os.ReadFile(filepath.Clean(path))
 	exists := err == nil
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return "", err
@@ -330,9 +330,9 @@ func AddRule(root string, spec RuleSpec) (string, error) {
 	}
 	restore := func() {
 		if exists {
-			fsutil.WriteFileAtomic(path, old, perm)
+			_ = fsutil.WriteFileAtomic(path, old, perm) // best effort: the caller reports the original error
 		} else {
-			os.Remove(path)
+			_ = os.Remove(path) // best effort: the caller reports the original error
 		}
 	}
 	cfg, err := LoadConfig(path)

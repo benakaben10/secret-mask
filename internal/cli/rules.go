@@ -111,7 +111,7 @@ func parseSpec(raw json.RawMessage) (detect.RuleSpec, map[string]any, error) {
 		return spec, nil, fmt.Errorf("invalid arguments: %w", err)
 	}
 	var all map[string]any
-	json.Unmarshal(raw, &all)
+	_ = json.Unmarshal(raw, &all) // same document as spec, already parsed above
 	return spec, all, nil
 }
 

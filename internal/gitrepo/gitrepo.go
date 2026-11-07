@@ -133,6 +133,7 @@ func (r *Repo) Add(paths []string) error {
 }
 
 func git(dir string, stdin io.Reader, args ...string) ([]byte, error) {
+	// #nosec G204 -- always the git executable, with arguments built in this package; no shell is involved.
 	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
 	cmd.Stdin = stdin
 	var stderr bytes.Buffer
@@ -170,7 +171,7 @@ func (r *Repo) InstallHook(command, mode string) (string, bool, error) {
 		"# Mode " + mode + ": " + Modes[mode] + ".\n" +
 		line + "\n" + blockEnd + "\n"
 	path := filepath.Join(r.HooksDir, "pre-commit")
-	old, err := os.ReadFile(path)
+	old, err := os.ReadFile(filepath.Clean(path))
 	var content string
 	switch {
 	case errors.Is(err, os.ErrNotExist):
@@ -191,7 +192,7 @@ func (r *Repo) InstallHook(command, mode string) (string, bool, error) {
 	}
 	changed := content != string(old)
 	if changed {
-		if err := os.MkdirAll(r.HooksDir, 0o755); err != nil {
+		if err := os.MkdirAll(r.HooksDir, 0o750); err != nil {
 			return path, false, err
 		}
 		if err := fsutil.WriteFileAtomic(path, []byte(content), 0o755); err != nil {
@@ -212,7 +213,7 @@ func (r *Repo) InstallHook(command, mode string) (string, bool, error) {
 // a shebang is left.
 func (r *Repo) RemoveHook() (string, bool, error) {
 	path := filepath.Join(r.HooksDir, "pre-commit")
-	old, err := os.ReadFile(path)
+	old, err := os.ReadFile(filepath.Clean(path))
 	if errors.Is(err, os.ErrNotExist) {
 		return path, false, nil
 	}

@@ -69,7 +69,7 @@ func Apply(o Options) (*Result, error) {
 // update loads a JSON object (missing file = empty), applies fn and writes it back if fn changed it.
 func update(path string, fn func(map[string]any) bool) (bool, error) {
 	doc := map[string]any{}
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Clean(path))
 	switch {
 	case err == nil:
 		if err := json.Unmarshal(data, &doc); err != nil {
@@ -89,7 +89,7 @@ func update(path string, fn func(map[string]any) bool) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return false, err
 	}
 	return true, fsutil.WriteFileAtomic(path, append(out, '\n'), 0o644)

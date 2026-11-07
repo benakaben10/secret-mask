@@ -152,16 +152,22 @@ func (a *App) stagedFindings(ctx context.Context, repo *gitrepo.Repo, t *target,
 		return nil, nil, err
 	}
 	defer os.RemoveAll(tmp)
+	// Staged paths come from git; writing through a root-scoped handle keeps every copy inside tmp.
+	mirror, err := os.OpenRoot(tmp)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer mirror.Close()
 	staged := map[string][]byte{}
 	for _, f := range files {
-		if !filepath.IsLocal(filepath.FromSlash(f.Path)) {
+		p := filepath.FromSlash(f.Path)
+		if !filepath.IsLocal(p) {
 			return nil, nil, fmt.Errorf("unexpected staged path %q", f.Path)
 		}
-		p := filepath.Join(tmp, filepath.FromSlash(f.Path))
-		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+		if err := mirror.MkdirAll(filepath.Dir(p), 0o700); err != nil {
 			return nil, nil, err
 		}
-		if err := os.WriteFile(p, f.Data, 0o600); err != nil {
+		if err := mirror.WriteFile(p, f.Data, 0o600); err != nil {
 			return nil, nil, err
 		}
 		staged[f.Path] = f.Data
@@ -173,11 +179,11 @@ func (a *App) stagedFindings(ctx context.Context, repo *gitrepo.Repo, t *target,
 		}
 	}
 	if ignore := filepath.Join(repo.Root, ".gitleaksignore"); fileExists(ignore) && staged[".gitleaksignore"] == nil {
-		data, err := os.ReadFile(ignore)
+		data, err := os.ReadFile(filepath.Clean(ignore))
 		if err != nil {
 			return nil, nil, err
 		}
-		if err := os.WriteFile(filepath.Join(tmp, ".gitleaksignore"), data, 0o600); err != nil {
+		if err := mirror.WriteFile(".gitleaksignore", data, 0o600); err != nil {
 			return nil, nil, err
 		}
 	}

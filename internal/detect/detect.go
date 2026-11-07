@@ -194,7 +194,7 @@ func (s *relFiles) Fragments(ctx context.Context, yield sources.FragmentsFunc) e
 		wg.Add(1)
 		s.sema.Sema.Go(func() error {
 			defer wg.Done()
-			f, err := os.Open(path)
+			f, err := os.Open(filepath.Clean(path))
 			if err != nil {
 				return nil
 			}
@@ -210,7 +210,7 @@ func (s *relFiles) Fragments(ctx context.Context, yield sources.FragmentsFunc) e
 // loadIgnore reads root-relative `file:rule:line` fingerprints. Commit fingerprints (4 fields) do not
 // apply to a directory scan and are skipped.
 func loadIgnore(path string) (map[string]bool, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Clean(path))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}
@@ -308,7 +308,7 @@ func readViper(path, text string) (vc gitleaksconfig.ViperConfig, err error) {
 // LoadReport reads a gitleaks JSON report (from the gitleaks CLI). Absolute paths are made relative
 // to dir; findings outside dir are dropped.
 func LoadReport(path, dir string) ([]Finding, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		return nil, err
 	}

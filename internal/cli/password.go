@@ -19,9 +19,9 @@ func PromptPassword(confirm bool) (string, error) {
 	r := bufio.NewReader(tty)
 	read := func(prompt string) (string, error) {
 		fmt.Fprint(tty, prompt)
-		stty(tty, "-echo")
+		setEcho(tty, false)
 		line, err := r.ReadString('\n')
-		stty(tty, "echo")
+		setEcho(tty, true)
 		fmt.Fprintln(tty)
 		if err != nil && line == "" {
 			return "", err
@@ -44,8 +44,12 @@ func PromptPassword(confirm bool) (string, error) {
 	return pw, nil
 }
 
-func stty(tty *os.File, arg string) {
-	cmd := exec.Command("stty", arg)
+// setEcho turns the terminal echo on or off around the password prompt.
+func setEcho(tty *os.File, on bool) {
+	cmd := exec.Command("stty", "-echo")
+	if on {
+		cmd = exec.Command("stty", "echo")
+	}
 	cmd.Stdin = tty
 	_ = cmd.Run()
 }

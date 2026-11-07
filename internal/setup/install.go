@@ -218,7 +218,7 @@ func (e *agentEnv) apply(ed edit, fn editFn) (string, error) {
 			return "", err
 		}
 		if ed.dir {
-			os.Remove(filepath.Dir(ed.path)) // only succeeds when empty
+			_ = os.Remove(filepath.Dir(ed.path)) // only succeeds when empty; a kept directory is fine
 		}
 		return status, nil
 	}
@@ -226,7 +226,7 @@ func (e *agentEnv) apply(ed edit, fn editFn) (string, error) {
 	if st, err := os.Stat(ed.path); err == nil {
 		perm = st.Mode().Perm()
 	}
-	if err := os.MkdirAll(filepath.Dir(ed.path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(ed.path), 0o750); err != nil {
 		return "", err
 	}
 	return status, fsutil.WriteFileAtomic(ed.path, out, perm)
