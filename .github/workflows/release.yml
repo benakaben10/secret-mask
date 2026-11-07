@@ -28,8 +28,15 @@ jobs:
 
       # SHA256SUMS lists every binary, so its signature covers them all. The Sigstore bundle holds the
       # signature and the certificate naming this workflow; install.sh verifies it when cosign is installed.
+      # Sigstore's transparency log (Rekor) has short outages: retry with growing waits instead of failing
+      # the release; a release is never published unsigned.
       - name: Sign checksums
-        run: cosign sign-blob --yes --bundle dist/SHA256SUMS.sigstore.json dist/SHA256SUMS
+        run: |
+          for wait in 30 60 90 120 0; do
+            cosign sign-blob --yes --bundle dist/SHA256SUMS.sigstore.json dist/SHA256SUMS && exit 0
+            [ "$wait" -gt 0 ] && { echo "::warning::signing failed, retrying in ${wait}s"; sleep "$wait"; }
+          done
+          exit 1
 
       # SLSA build provenance: which commit and workflow built each binary. Stored on GitHub
       # (gh attestation verify) and attached to the release.
@@ -75,7 +82,14 @@ jobs:
             org.opencontainers.image.licenses=MIT
 
       - name: Sign image
-        run: cosign sign --yes "ghcr.io/${{ github.repository_owner }}/secret-mask@${{ steps.image.outputs.digest }}"
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/secret-mask@${{ steps.image.outputs.digest }}
+        run: |
+          for wait in 30 60 90 120 0; do
+            cosign sign --yes "$IMAGE" && exit 0
+            [ "$wait" -gt 0 ] && { echo "::warning::signing failed, retrying in ${wait}s"; sleep "$wait"; }
+          done
+          exit 1
 
       - name: Image provenance
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
