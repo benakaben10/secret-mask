@@ -20,7 +20,8 @@ ENV CGO_ENABLED=0 LDFLAGS="-s -w -X github.com/benakaben10/secret-mask/internal/
 RUN GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags "$LDFLAGS" -o /out/secret-mask ./cmd/secret-mask
 
 FROM build AS test
-RUN go vet ./... && go test -count=1 ./...
+# protect / pre-commit tests drive a real git.
+RUN apk add --no-cache git && go vet ./... && go test -count=1 ./...
 
 FROM build AS cross
 RUN set -e; for p in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do \

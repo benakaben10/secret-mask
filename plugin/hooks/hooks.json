@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Read|Grep|NotebookRead",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "secret-mask hook",
+            "timeout": 120
+          }
+        ]
+      }
+    ]
+  }
+}

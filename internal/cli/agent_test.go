@@ -235,3 +235,60 @@ func TestSetupCommand(t *testing.T) {
 		t.Errorf("bad scope exit %d", code)
 	}
 }
+
+func TestInstallUninstallCommands(t *testing.T) {
+	h := newHarness(t, nil)
+	home := t.TempDir()
+	h.env["HOME"] = home
+	if code := h.run("install", "--clients", "claude,codex", "--dry-run"); code != ExitOK || !strings.Contains(h.stdout.String(), "would be created") {
+		t.Fatalf("dry run: exit %d\n%s%s", code, h.stdout.String(), h.stderr.String())
+	}
+	if _, err := os.Stat(filepath.Join(home, ".claude.json")); !os.IsNotExist(err) {
+		t.Error("dry run wrote files")
+	}
+	if code := h.run("install", "--clients", "claude,codex"); code != ExitOK {
+		t.Fatalf("install exit %d: %s", code, h.stderr.String())
+	}
+	out := h.stdout.String()
+	for _, want := range []string{"Claude Code:", "Codex CLI:", "/hooks", filepath.Join(home, ".codex", "config.toml")} {
+		if !strings.Contains(out, want) {
+			t.Errorf("install output missing %q:\n%s", want, out)
+		}
+	}
+	settings, _ := os.ReadFile(filepath.Join(home, ".claude", "settings.json"))
+	if !strings.Contains(string(settings), `"/usr/local/bin/secret-mask hook"`) {
+		t.Errorf("hook uses the executable path: %s", settings)
+	}
+	if code := h.run("uninstall", "--clients", "claude,codex"); code != ExitOK || !strings.Contains(h.stdout.String(), "(removed)") {
+		t.Fatalf("uninstall exit %d\n%s", code, h.stdout.String())
+	}
+	if entries, _ := os.ReadDir(filepath.Join(home, ".claude")); len(entries) != 1 { // skills/ stays, empty
+		t.Errorf("left in ~/.claude: %v", entries)
+	}
+	if code := h.run("install", "--clients", "emacs"); code != ExitUsage {
+		t.Errorf("unknown client exit %d", code)
+	}
+	if code := h.run("install", "extra"); code != ExitUsage {
+		t.Errorf("positional argument exit %d", code)
+	}
+}
+
+func TestHookClients(t *testing.T) {
+	h := newHarness(t, leakyProject())
+	in, _ := json.Marshal(map[string]any{
+		"hook_event_name": "BeforeTool", "tool_name": "read_file", "cwd": h.dir,
+		"tool_input": map[string]any{"absolute_path": filepath.Join(h.dir, ".env")},
+	})
+	h.stdin = string(in)
+	if code := h.run("hook", "--client", "gemini"); code != ExitOK || !strings.Contains(h.stdout.String(), `"decision":"deny"`) {
+		t.Errorf("gemini: exit %d %s", code, h.stdout.String())
+	}
+	in, _ = json.Marshal(map[string]any{"hook_event_name": "beforeShellExecution", "command": "cat deploy/ci.sh", "cwd": h.dir})
+	h.stdin = string(in)
+	if code := h.run("hook", "--client", "cursor"); code != ExitOK || !strings.Contains(h.stdout.String(), `"permission":"deny"`) || strings.Contains(h.stdout.String(), githubToken) {
+		t.Errorf("cursor: exit %d %s", code, h.stdout.String())
+	}
+	if code := h.run("hook", "--client", "emacs"); code != ExitUsage {
+		t.Errorf("unknown client exit %d", code)
+	}
+}

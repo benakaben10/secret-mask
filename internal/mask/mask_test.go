@@ -192,7 +192,9 @@ func TestMaskSkips(t *testing.T) {
 
 func TestMaskSecretOverlappingPlaceholder(t *testing.T) {
 	dir := tree(t, map[string]string{"a.env": "X=__SECRET_MASK_0123456789abcdef__\nY=SECRET_MASK_0123\n"})
-	res, err := Mask(dir, []detect.Finding{f("a.env", "SECRET_MASK_0123"), f("a.env", "__SECRET_MASK_x")}, NewState(), Options{})
+	s := NewState()
+	s.secrets["0123456789abcdef"] = "known" // the placeholder belongs to this vault
+	res, err := Mask(dir, []detect.Finding{f("a.env", "SECRET_MASK_0123"), f("a.env", "__SECRET_MASK_x")}, s, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -474,5 +476,77 @@ func TestMissingErrorMessage(t *testing.T) {
 	want := "1 placeholder(s) are missing or were altered:\n  __SECRET_MASK_0123456789abcdef__ (masked in: a.env, b.yaml)"
 	if err.Error() != want {
 		t.Errorf("Error() =\n%s\nwant\n%s", err.Error(), want)
+	}
+}
+
+func TestMaskRefusesTreeOfAnotherVault(t *testing.T) {
+	dir := tree(t, originalFiles)
+	if _, err := Mask(dir, originalFindings, NewState(), Options{}); err != nil {
+		t.Fatal(err)
+	}
+	masked := map[string]string{}
+	for rel := range originalFiles {
+		masked[rel] = read(t, dir, rel)
+	}
+	// The vault is lost: a fresh state must not mask the tree a second time, even with new findings.
+	write(t, dir, "new.env", "TOKEN=fresh-secret-1\n")
+	_, err := Mask(dir, append(originalFindings, f("new.env", "fresh-secret-1")), NewState(), Options{})
+	var ferr *ForeignError
+	if !errors.As(err, &ferr) || ferr.Tokens != 5 || len(ferr.Files) != 3 {
+		t.Fatalf("err = %v", err)
+	}
+	if !strings.Contains(err.Error(), "already masked with another vault") {
+		t.Errorf("message: %v", err)
+	}
+	for rel, want := range masked {
+		if got := read(t, dir, rel); got != want {
+			t.Errorf("%s changed by a refused mask", rel)
+		}
+	}
+	if got := read(t, dir, "new.env"); got != "TOKEN=fresh-secret-1\n" {
+		t.Errorf("new.env changed by a refused mask: %q", got)
+	}
+}
+
+func TestMaskTwiceWithSameVaultIsNoop(t *testing.T) {
+	dir := tree(t, originalFiles)
+	s := NewState()
+	if _, err := Mask(dir, originalFindings, s, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	before := map[string]string{}
+	for rel := range originalFiles {
+		before[rel] = read(t, dir, rel)
+	}
+	// Same findings again (e.g. a stale report): the values are no longer in the files.
+	res, err := Mask(dir, originalFindings, s, Options{})
+	if err != nil || res.Masked != 0 || s.Len() != 4 {
+		t.Fatalf("second mask: res=%+v err=%v len=%d", res, err, s.Len())
+	}
+	for rel, want := range before {
+		if got := read(t, dir, rel); got != want {
+			t.Errorf("%s changed by the second mask:\n%s\n%s", rel, want, got)
+		}
+	}
+}
+
+func TestMaskNeverAltersAPlaceholder(t *testing.T) {
+	dir := tree(t, map[string]string{"a.env": "A=first-value\n"})
+	s := NewState()
+	if _, err := Mask(dir, []detect.Finding{f("a.env", "first-value")}, s, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	tok := Pattern.FindString(read(t, dir, "a.env"))
+	// A value that straddles the end of the placeholder ("…__" + "\nB") appears both across the
+	// placeholder's edge and on its own; only the standalone occurrence may be masked.
+	straddle := tok[len(tok)-4:] + "\nB"
+	write(t, dir, "a.env", "A="+tok+"\nB=x\nC="+straddle+"\n")
+	res, err := Mask(dir, []detect.Finding{f("a.env", straddle)}, s, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := read(t, dir, "a.env")
+	if !strings.HasPrefix(got, "A="+tok+"\nB=x\nC=__SECRET_MASK_") || res.Masked != 1 {
+		t.Errorf("masked %d, content %q", res.Masked, got)
 	}
 }

@@ -81,6 +81,14 @@ run 0 "status" "$SM" status "$P"
 has "$W/out" "missing: 0" "status: all placeholders present"
 run 0 "re-mask finds nothing new" env SECRET_MASK_PASSWORD=$PW "$SM" mask "$P"
 has "$W/out" "Masked 0" "re-mask is a no-op"
+cp -R "$P" "$W/masked"
+run 5 "mask with another vault refuses (no double masking)" env SECRET_MASK_PASSWORD=$PW "$SM" mask --vault "$W/other.vault" "$P"
+has "$W/out" "already masked with another vault" "double masking explained"
+if [ ! -e "$W/other.vault" ] && diff -r "$W/masked" "$P" >/dev/null; then ok "refused mask wrote nothing"; else bad "refused mask changed files"; fi
+mv "$P/.secret-mask.vault" "$W/vault.bak"
+run 5 "mask without the vault refuses" env SECRET_MASK_PASSWORD=$PW "$SM" mask "$P"
+if [ ! -e "$P/.secret-mask.vault" ]; then ok "no second vault created"; else bad "a second vault was created"; fi
+mv "$W/vault.bak" "$P/.secret-mask.vault"
 
 echo "-- an AI edits the masked project"
 TOKEN=$(grep -o '__SECRET_MASK_[0-9a-f]*__' "$P/config/app.json")
@@ -114,6 +122,52 @@ has "$P/.claude/settings.json" '"matcher": "Read|Grep|NotebookRead"' "hook match
 has "$P/.mcp.json" '"secret-mask"' "MCP server registered"
 run 0 "setup again" "$SM" setup "$P"
 has "$W/out" "nothing changed" "setup is idempotent"
+
+echo "-- install for coding agents"
+H=$W/home
+mkdir -p "$H/.codex" "$H/.gemini"
+run 0 "install detects agents" env HOME=$H "$SM" install
+has "$W/out" "Codex CLI:" "Codex detected"
+has "$W/out" "Gemini CLI:" "Gemini detected"
+hasnt "$W/out" "Cursor:" "Cursor not detected"
+has "$H/.codex/config.toml" "[mcp_servers.secret-mask]" "Codex MCP server"
+has "$H/.codex/hooks.json" "hook --client codex" "Codex hook"
+has "$H/.gemini/settings.json" "hook --client gemini" "Gemini hook"
+has "$H/.gemini/GEMINI.md" "secret-mask:start" "Gemini instructions"
+run 0 "install again" env HOME=$H "$SM" install
+hasnt "$W/out" "(updated)" "install is idempotent"
+printf '{"tool_name":"Bash","cwd":"%s","tool_input":{"command":"cat .env"}}' "$W/original" >"$W/codex.in"
+run 0 "codex hook" sh -c "\"$SM\" hook --client codex <\"$W/codex.in\""
+has "$W/out" '"permissionDecision":"deny"' "codex hook blocks cat of a leaky file"
+printf '{"hook_event_name":"beforeReadFile","file_path":"%s/.env","workspace_roots":["%s"]}' "$W/original" "$W/original" >"$W/cursor.in"
+run 0 "cursor hook" sh -c "\"$SM\" hook --client cursor <\"$W/cursor.in\""
+has "$W/out" '"permission":"deny"' "cursor hook blocks a leaky read"
+run 0 "uninstall" env HOME=$H "$SM" uninstall
+if [ -z "$(find "$H" -type f)" ]; then ok "uninstall removes every file it wrote"; else find "$H" -type f >"$W/out"; bad "uninstall left files"; fi
+
+if command -v git >/dev/null 2>&1; then
+  echo "-- git pre-commit protection"
+  G=$W/repo
+  rm -rf "$G" && cp -R "$W/original" "$G"
+  export GIT_AUTHOR_NAME=e2e GIT_AUTHOR_EMAIL=e2e@example.com GIT_COMMITTER_NAME=e2e GIT_COMMITTER_EMAIL=e2e@example.com
+  git -C "$G" init -q
+  run 0 "protect" "$SM" protect --command "$SM" "$G"
+  has "$G/.git/hooks/pre-commit" "pre-commit --mode block" "pre-commit hook installed"
+  git -C "$G" add -A
+  run 1 "commit with secrets is blocked" git -C "$G" commit -qm leak
+  has "$W/out" "commit blocked" "the hook explains why"
+  hasnt "$W/out" "$AWS" "the hook never prints secret values"
+  if git -C "$G" rev-parse -q --verify HEAD >/dev/null; then bad "nothing committed"; else ok "nothing committed"; fi
+  run 0 "protect --mode mask" "$SM" protect --mode mask --command "$SM" "$G"
+  run 0 "commit masks and re-stages" env SECRET_MASK_PASSWORD=$PW git -C "$G" commit -qm masked
+  git -C "$G" show HEAD:.env >"$W/committed"
+  hasnt "$W/committed" "$AWS" "the committed .env has no secret"
+  has "$W/committed" "__SECRET_MASK_" "the committed .env has placeholders"
+  run 0 "protect --remove" "$SM" protect --remove "$G"
+  if [ -e "$G/.git/hooks/pre-commit" ]; then bad "hook removed"; else ok "hook removed"; fi
+else
+  echo "-- git pre-commit protection: skipped (no git in this environment)"
+fi
 
 echo "== $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

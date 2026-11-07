@@ -29,10 +29,54 @@ type MaskResult struct {
 
 type secretRule struct{ value, rule string }
 
+// ForeignError means the tree already holds placeholders that the vault does not know: it was masked
+// with another vault (deleted, moved or passed with a different --vault). Masking again would bury
+// those placeholders under a second vault, so it is refused.
+type ForeignError struct {
+	Files  map[string][]string // file -> unknown placeholders
+	Tokens int
+}
+
+func (e *ForeignError) Error() string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "refusing to mask: %d placeholder(s) are not in this vault, so this tree was already masked with another vault:\n", e.Tokens)
+	for _, f := range slices.Sorted(maps.Keys(e.Files)) {
+		fmt.Fprintf(&b, "  %s: %s\n", f, strings.Join(e.Files[f], ", "))
+	}
+	b.WriteString("restore it with the vault that masked it (or pass that vault with --vault) before masking again")
+	return b.String()
+}
+
+// CheckForeign returns a *ForeignError when dir contains placeholders whose id is not known.
+func CheckForeign(dir string, skip map[string]bool, known func(id string) bool) error {
+	hits, err := Scan(dir, skip)
+	if err != nil {
+		return err
+	}
+	e := &ForeignError{Files: map[string][]string{}}
+	for _, h := range hits {
+		for _, id := range h.IDs() {
+			if tok := Placeholder(id); !known(id) && !slices.Contains(e.Files[h.Rel], tok) {
+				e.Files[h.Rel] = append(e.Files[h.Rel], tok)
+				e.Tokens++
+			}
+		}
+	}
+	if e.Tokens > 0 {
+		return e
+	}
+	return nil
+}
+
 // Mask replaces every occurrence of each finding's secret in that finding's file with the secret's
 // placeholder. Within a file, longer secrets go first so a secret containing another is masked whole.
 // The same value gets the same placeholder everywhere, including values already in the vault.
+// Existing placeholders are never modified, and a tree holding placeholders of another vault is refused
+// with a *ForeignError before anything is written.
 func Mask(dir string, findings []detect.Finding, s *State, opt Options) (*MaskResult, error) {
+	if err := CheckForeign(dir, opt.Skip, func(id string) bool { _, ok := s.secrets[id]; return ok }); err != nil {
+		return nil, err
+	}
 	byFile := map[string]map[string]string{}
 	for _, f := range findings {
 		if opt.Skip[f.File] {
@@ -90,8 +134,7 @@ func maskFile(dir, rel string, secrets map[string]string, s *State, dryRun bool,
 			res.Skipped = append(res.Skipped, fmt.Sprintf("%s: %s secret overlaps a placeholder", rel, sr.rule))
 			continue
 		}
-		n := strings.Count(content, sr.value)
-		if n == 0 {
+		if _, n := replaceOutsideTokens(content, sr.value, ""); n == 0 {
 			// e.g. gitleaks decoded a base64 value; the literal secret is not in the file.
 			res.Skipped = append(res.Skipped, fmt.Sprintf("%s: %s secret not found literally (encoded?)", rel, sr.rule))
 			continue
@@ -101,7 +144,8 @@ func maskFile(dir, rel string, secrets map[string]string, s *State, dryRun bool,
 			return 0, err
 		}
 		token := Placeholder(id)
-		content = strings.ReplaceAll(content, sr.value, token)
+		var n int
+		content, n = replaceOutsideTokens(content, sr.value, token)
 		tokens = append(tokens, token)
 		s.addFile(id, rel)
 		replaced += n
@@ -116,6 +160,22 @@ func maskFile(dir, rel string, secrets map[string]string, s *State, dryRun bool,
 		return replaced, nil
 	}
 	return replaced, fsutil.WriteFileAtomic(path, []byte(content), info.Mode().Perm())
+}
+
+// replaceOutsideTokens replaces old with new only in the text between placeholders, so an existing
+// placeholder is never altered even by a value that straddles its edge. It returns the result and the
+// number of replacements.
+func replaceOutsideTokens(content, old, new string) (string, int) {
+	var b strings.Builder
+	n, last := 0, 0
+	for _, loc := range append(Pattern.FindAllStringIndex(content, -1), []int{len(content), len(content)}) {
+		seg := content[last:loc[0]]
+		n += strings.Count(seg, old)
+		b.WriteString(strings.ReplaceAll(seg, old, new))
+		b.WriteString(content[loc[0]:loc[1]])
+		last = loc[1]
+	}
+	return b.String(), n
 }
 
 func overlapsAny(secret string, tokens []string) bool {

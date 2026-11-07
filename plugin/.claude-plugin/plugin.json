@@ -1,0 +1,11 @@
+{
+  "name": "secret-mask",
+  "description": "Blocks reading files with unmasked secrets, adds read-only secret-mask MCP tools and a skill with the placeholder rules. Needs the secret-mask binary on PATH.",
+  "author": {
+    "name": "benakaben10",
+    "url": "https://github.com/benakaben10"
+  },
+  "homepage": "https://github.com/benakaben10/secret-mask",
+  "repository": "https://github.com/benakaben10/secret-mask",
+  "license": "MIT"
+}

@@ -1,0 +1,15 @@
+{
+  "name": "secret-mask",
+  "description": "secret-mask for Claude Code: block reads of unmasked secrets and keep placeholders intact.",
+  "owner": {
+    "name": "benakaben10",
+    "url": "https://github.com/benakaben10"
+  },
+  "plugins": [
+    {
+      "name": "secret-mask",
+      "source": "./plugin",
+      "description": "Blocks reading files with unmasked secrets, adds read-only secret-mask MCP tools and a skill with the placeholder rules."
+    }
+  ]
+}
