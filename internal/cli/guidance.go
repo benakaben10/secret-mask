@@ -15,7 +15,9 @@ import (
 )
 
 var (
-	devPath = regexp.MustCompile(`(?i)(?:^|/)(?:tests?|testdata|spec|__tests__|fixtures?|mocks?|examples?|samples?|demo)(?:/|$)|` +
+	// devPath: files that usually hold mock, test, example or CI values.
+	devPath = regexp.MustCompile(`(?i)(?:^|/)(?:tests?|testdata|specs?|__tests__|__mocks__|fixtures?|mocks?|fakes?|stubs?|e2e|integration|examples?|samples?|demo|\.github|\.gitlab|ci)(?:/|$)|` +
+		`(?:_test\.go|\.(?:test|spec)\.[cm]?[jt]sx?|_test\.py|_spec\.rb|Tests?\.(?:java|kt|cs))$|(?:^|/)test_[\w-]+\.py$|(?:^|/)\.gitlab-ci\.ya?ml$|` +
 		`(?:^|/)\.env\.(?:example|sample|template|test|dev|development|local)$|(?:^|/)docker-compose\.(?:dev|local|override|test)\.ya?ml$`)
 	devHost = regexp.MustCompile(`(?i)\b(?:localhost|127\.0\.0\.1|0\.0\.0\.0|host\.docker\.internal|[\w-]+\.local|example\.(?:com|org|net))\b`)
 )
@@ -60,7 +62,7 @@ func reviewFindings(ctx context.Context, root, config, path string) (string, err
 		hint := "looks like a REAL credential: mask it"
 		switch {
 		case devPath.MatchString(f.File):
-			hint = "may be a test/dev value (test, example or dev file); ask the user"
+			hint = "may be a mock/test/example/CI value (test, example, CI or dev file); ask the user"
 		case devHost.MatchString(line):
 			hint = "may be a local-dev value (points to localhost / a local host); ask the user"
 		}
@@ -73,6 +75,11 @@ How to tell the user (they decide; do not edit .gitleaksignore or .gitleaks.toml
       secret-mask mask ` + shellQuote(root) + `
 - Value that only works locally and is safe for anyone to see (local Docker database, test fixture, example
   file), allowlist it, in one of these ways:
+  0. Best for mocks, tests, examples, CI and integration fixtures: the user renames the value so it starts with
+     fake- or fakesecret- (DB_PASSWORD=fake-db-password, STRIPE_KEY=fakesecret-stripe). Every rule skips those,
+     in every project, with no allowlist to maintain. Only for values that were never real credentials: a real
+     one renamed fake-xxx is still real and would leak. Values in a provider's format (ghp_..., AKIA..., sk_live_...)
+     are found by that format whatever the prefix: write fake ones that do not follow it (fake-github-token).
   1. One finding: add the "file:rule:line" shown above to .gitleaksignore in the project root. It stops
      matching if the line moves; add it again then.
   2. A whole dev/test file or folder, in .gitleaks.toml (paths are project-relative, use ^ to anchor):
@@ -91,6 +98,8 @@ How to tell the user (they decide; do not edit .gitleaksignore or .gitleaks.toml
          stopwords = ["devpass", "localdev"]
   Allowlisted values are never masked: agents can read them and they can be committed. Never allowlist a value
   that works anywhere but the developer's own machine. Check the result with: secret-mask check
+When YOU write a mock, test, example, CI or integration value, always start it with fake- (fake-db-password,
+fake-api-key): it is then never reported nor masked.
 `)
 	return b.String(), nil
 }
@@ -173,6 +182,8 @@ func nextSteps(ctx context.Context, root, config string) (string, error) {
 		return "", serr
 	}
 	b.WriteString("STATE: SAFE. The project is masked; work on it and keep every __SECRET_MASK_<16 hex>__ placeholder byte-for-byte.\n")
+	fmt.Fprintf(&b, "MANDATORY before reading or editing any file: read %s in full (or call masking_guide) and follow it for the\n"+
+		"whole task.\n", filepath.Join(root, guide.DefaultName))
 	b.WriteString(text)
 	b.WriteString("\nWhen the task is finished, call masking_status (missing must be 0), then tell the user how to unseal it:\n\n")
 	b.WriteString("  Your work is ready. To put the real secrets back (\"unseal\"), run in your terminal, with your password:\n")

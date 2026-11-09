@@ -259,6 +259,21 @@ has "$W/out" "1 unmasked secret(s)" "one finding left"
 has "$W/out" ".env:2" "the production password"
 printf '.env:secret-mask-password-unquoted:2\n' >"$D/.gitleaksignore"
 run 0 ".gitleaksignore allowlists one finding" "$SM" check "$D"
+F=$W/fakeproject
+mkdir -p "$F/test"
+printf 'DB_PASSWORD=fake-db-password\nAPI_TOKEN=fakesecret-token-1\nDATABASE_URL=postgres://app:fake-pw@db/app\n' >"$F/.env.test"
+printf 'password := "fake-pass-for-tests"\n' >"$F/test/db_test.go"
+run 0 "fake- and fakesecret- values are never reported (no allowlist needed)" "$SM" check "$F"
+printf 'REAL_PASSWORD=Admin@123\n' >>"$F/.env.test"
+run 4 "a real value next to them still is" "$SM" check "$F"
+has "$W/out" "1 unmasked secret(s)" "only the real value"
+run 0 "rules lists the fake- allowlist" "$SM" rules "$F"
+has "$W/out" "global allowlist" "global allowlists counted"
+M_SAVE=$M
+M=$F
+mcp review_findings '{}'
+M=$M_SAVE
+has "$W/out" "fake- or fakesecret-" "review_findings explains the fake- convention"
 
 echo "-- shell completion"
 for SH in bash zsh; do

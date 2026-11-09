@@ -240,9 +240,49 @@ Agents do the same through MCP: `list_rules` / `get_rule` read every rule, `test
 sample (and, with `scan_project`, reports project locations without values), `add_rule` appends it to
 `.gitleaks.toml`. `add_rule` only adds new ids: it cannot replace, disable or allowlist an existing rule.
 
+### Mock, test, example and CI values: the `fake-` prefix
+
+Every config (built-in or project) includes this global allowlist from
+[internal/detect/rules.toml](internal/detect/rules.toml):
+
+```toml
+[[allowlists]]
+description = "Fake values in examples, CI and tests: always start with fake- (or fakesecret-), never real credentials"
+regexes = ['''^fake(?:secret)?-''']
+```
+
+A value that starts with `fake-` or `fakesecret-` is never reported nor masked, by any rule, in any project.
+Use it for every credential that only exists for tests:
+
+| Where | Example |
+|---|---|
+| unit tests, mocks, stubs | `DB_PASSWORD=fake-db-password` in `.env.test` |
+| integration and e2e tests, local docker-compose | `POSTGRES_PASSWORD: fake-postgres` |
+| CI jobs (throwaway service containers) | `MYSQL_ROOT_PASSWORD=fake-mysql-root` |
+| examples and docs | `.env.example` with `API_KEY=fake-api-key` |
+
+How to tell a test value from a real one:
+
+- **Test value** (rename it `fake-…`): it lives in a test, spec, mock, fixture, example, e2e or CI file, or points
+  to `localhost`, a local Docker service or `example.com`, and works nowhere but a developer's machine or a
+  throwaway CI container.
+- **Real credential** (mask it): anything a shared environment accepts: production, staging, a shared dev
+  server, a SaaS account, a personal token. A real value renamed `fake-…` is still real, and is now exposed.
+
+Two limits:
+
+- Only the start of the detected value counts. Provider formats (`ghp_…`, `AKIA…`, `sk_live_…`) are detected
+  by their own shape, so `fake-ghp_…` is still reported: write fake values that do not imitate a provider
+  (`fake-github-token`), or allowlist them below.
+- The allowlist cannot be turned off. Do not give the prefix to anything that must stay secret.
+
+Agents follow the same convention: the MCP instructions, `review_findings`, the skill and
+`SECRET_MASK_AI_GUIDE.md` tell them to start every mock, test, example or CI value they write with `fake-`, and
+to suggest the rename to the user for test values they find.
+
 ### Local development: allowlists
 
-A value that only works on the developer's machine (a local Docker database, a test fixture, an example file)
+For values that cannot be renamed `fake-…`: a value that only works on the developer's machine (a local Docker database, a test fixture, an example file)
 need not be masked. Allowlist it, in the narrowest way that fits:
 
 | Need | Where | Example |
@@ -357,7 +397,7 @@ kept, re-running is a no-op, `uninstall` removes only what secret-mask wrote):
   | `check_secrets` | unmasked secrets in a file or directory (rule ids and locations) |
   | `review_findings` | each finding's line with the value «redacted», a hint (real credential vs. local-dev/test value) and the allowlist lines the user can add |
   | `masking_status` | every placeholder still present? (`missing` must be 0 before finishing) |
-  | `masking_guide` | the rules for editing a masked project |
+  | `masking_guide` | the content of `SECRET_MASK_AI_GUIDE.md`: the rules for editing a masked project |
   | `list_rules`, `get_rule` | every detection rule in use, in full |
   | `test_rule` | a draft rule run on a sample, and on the project (locations only) |
   | `add_rule` | appends a new rule to `.gitleaks.toml` (the only tool that writes; cannot change existing rules) |
@@ -365,7 +405,10 @@ kept, re-running is a no-op, `uninstall` removes only what secret-mask wrote):
 - **Workflow the agent follows** (skill, instructions, hook message): at the start of a task it calls
   `next_steps`. Unmasked secrets: it stops and asks you to run `secret-mask mask <project>` (your password, which
   it never sees), and continues only after you confirm and the check passes. A finding that may be a dev value:
-  it shows you `review_findings` and you choose between masking and allowlisting. At the end it checks
+  it shows you `review_findings` and you choose between masking and allowlisting. In a masked project it reads
+  `SECRET_MASK_AI_GUIDE.md` in full before any other file (the MCP instructions, `next_steps`, the session-start
+  hook and the skill all make this mandatory). Mock, test, example and CI values it writes start with `fake-`.
+  At the end it checks
   `masking_status` and tells you how to unseal: `secret-mask restore <project>` (`--dry-run` to preview,
   `--clean` to drop the vault).
 - **Skill and instructions** carry that workflow and the placeholder rules. A skill file you wrote yourself is never overwritten

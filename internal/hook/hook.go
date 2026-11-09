@@ -250,8 +250,13 @@ func SessionContext(raw []byte, projectDir string, check Checker) string {
 		return fmt.Sprintf("secret-mask could not scan %s for secrets (%v). Before indexing or reading files, call the "+
 			"secret-mask MCP tool next_steps or run `secret-mask check %s`.", root, err, root)
 	}
+	guideNote := ""
+	if g := filepath.Join(root, aiGuide); fileExists(g) {
+		guideNote = fmt.Sprintf("This project is masked by secret-mask. MANDATORY: read %s in full before reading or editing "+
+			"any other file, and follow it for the whole task (keep every __SECRET_MASK_<16 hex>__ placeholder byte-for-byte).", g)
+	}
 	if len(findings) == 0 {
-		return ""
+		return guideNote
 	}
 	files := map[string]bool{}
 	for _, f := range findings {
@@ -260,8 +265,16 @@ func SessionContext(raw []byte, projectDir string, check Checker) string {
 	return fmt.Sprintf("secret-mask: this project has %d unmasked secret(s) in %s. Deal with this BEFORE anything else: "+
 		"before indexing the project or building a code graph (other MCP servers), and before reading files. Tell the "+
 		"user to run `secret-mask mask %s` in their own terminal (it needs their password) and wait for them; the "+
-		"secret-mask MCP tool next_steps has the exact wording. Reads and indexing of these files are blocked until then.",
-		len(findings), strings.Join(slices.Sorted(maps.Keys(files)), ", "), root)
+		"secret-mask MCP tool next_steps has the exact wording. Reads and indexing of these files are blocked until then. %s",
+		len(findings), strings.Join(slices.Sorted(maps.Keys(files)), ", "), root, guideNote)
+}
+
+// aiGuide is the guide masking writes at the root of a masked tree (guide.DefaultName).
+const aiGuide = "SECRET_MASK_AI_GUIDE.md"
+
+func fileExists(p string) bool {
+	st, err := os.Stat(p)
+	return err == nil && st.Mode().IsRegular()
 }
 
 // shellTargets is a best-effort reading of a shell command: every word naming an existing file is a

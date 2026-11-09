@@ -278,6 +278,16 @@ func loadConfig(path, text string, builtin bool) (cfg gitleaksconfig.Config, err
 			vc.Rules = append(vc.Rules, r)
 		}
 	}
+	// secret-mask's global allowlists (the fake- convention) apply to every config. gitleaks refuses the
+	// deprecated single [allowlist] next to [[allowlists]] (its own default config still uses it), so it is
+	// moved into the list first, as gitleaks itself does.
+	if len(extra.Allowlists) > 0 {
+		if vc.AllowList != nil {
+			vc.Allowlists = append(vc.Allowlists, vc.AllowList)
+			vc.AllowList = nil
+		}
+		vc.Allowlists = append(vc.Allowlists, extra.Allowlists...)
+	}
 	extendDepth = 0
 	if cfg, err = vc.Translate(); err != nil {
 		return cfg, fmt.Errorf("gitleaks config %s: %w", name, err)

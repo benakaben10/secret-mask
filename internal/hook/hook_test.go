@@ -331,4 +331,11 @@ func TestSessionContext(t *testing.T) {
 	if got := SessionContext(raw, "", fake(nil, nil, &calls)); got != "" {
 		t.Errorf("clean project: %q", got)
 	}
+	// A masked project: the agent must read the AI guide first.
+	if err := os.WriteFile(filepath.Join(dir, aiGuide), []byte("# rules\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := SessionContext(raw, "", fake(nil, nil, &calls)); !strings.Contains(got, "MANDATORY: read "+filepath.Join(dir, aiGuide)) {
+		t.Errorf("masked project: %q", got)
+	}
 }

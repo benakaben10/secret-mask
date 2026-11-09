@@ -331,7 +331,7 @@ func TestMCPNextStepsGuidesTheUser(t *testing.T) {
 		t.Fatal("mask")
 	}
 	text, _ = h.tool("next_steps", nil)
-	for _, want := range []string{"STATE: SAFE. The project is masked", "unseal", "secret-mask restore " + h.dir, "restore --clean", "missing: 0"} {
+	for _, want := range []string{"STATE: SAFE. The project is masked", "MANDATORY before reading or editing any file: read", "SECRET_MASK_AI_GUIDE.md", "unseal", "secret-mask restore " + h.dir, "restore --clean", "missing: 0"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("masked: missing %q in\n%s", want, text)
 		}
@@ -423,8 +423,8 @@ func TestMCPReviewFindings(t *testing.T) {
 	for _, want := range []string{
 		"DATABASE_URL=postgres://app:«redacted»@localhost:5432/app", "may be a local-dev value",
 		"PROD_DB_PASSWORD=«redacted»", "looks like a REAL credential",
-		"POSTGRES_PASSWORD: «redacted»", "may be a test/dev value",
-		".env:secret-mask-password-unquoted:2", "targetRules", "stopwords", "do not edit .gitleaksignore",
+		"POSTGRES_PASSWORD: «redacted»", "may be a mock/test/example/CI value",
+		".env:secret-mask-password-unquoted:2", "targetRules", "stopwords", "do not edit .gitleaksignore", "fake- or fakesecret-", "When YOU write a mock",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("missing %q in\n%s", want, text)

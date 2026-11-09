@@ -26,8 +26,11 @@ keeps the originals in an encrypted vault (`.secret-mask.vault`). Only the user 
    For a new vault they choose a password of at least 8 characters and must keep it; for an existing vault
    they use the same password. Wait until they confirm, then check again (`next_steps`) and continue only when
    it reports SAFE.
-3. **Work** on the masked files, keeping placeholders exactly as written (rules below).
-4. **End of the task:** call `masking_status`: `missing` must be 0. Then tell the user how to unseal:
+3. **Read `SECRET_MASK_AI_GUIDE.md` (mandatory).** A masked project has this file at its root (and at the root
+   of every masked directory). Read it in full before reading or editing any other file, and follow it for the
+   whole task; `masking_guide` returns the same text.
+4. **Work** on the masked files, keeping placeholders exactly as written (rules below).
+5. **End of the task:** call `masking_status`: `missing` must be 0. Then tell the user how to unseal:
 
    ```sh
    secret-mask status <project>             # missing must be 0
@@ -54,6 +57,24 @@ allowlist the user can add. Explain the choice to the user and let them decide:
 
 Never edit `.gitleaksignore` or the allowlists of `.gitleaks.toml` yourself, and never suggest allowlisting a
 value that works anywhere but the developer's own machine.
+
+### Mock, test, example, CI and integration values: the `fake-` convention
+
+Every config has a built-in global allowlist: a value starting with `fake-` or `fakesecret-` is never
+reported nor masked, by any rule, in any project.
+
+- **When you write one** (a unit-test password, a mock API key, an example in docs, a CI or docker-compose
+  test credential, an integration fixture), always start it with `fake-`: `DB_PASSWORD=fake-db-password`,
+  `STRIPE_KEY=fake-stripe-key`. Never put a real-looking or real credential there.
+- **When a finding is such a value** (test, spec, mock, fixture, example, e2e, CI file; localhost URL), suggest
+  the user rename it with the `fake-` prefix: it is better than an allowlist (self-describing, nothing to
+  maintain). Only for values that were never real: a real credential renamed `fake-…` is still real and leaks.
+- Provider formats (`ghp_…`, `AKIA…`, `sk_live_…`) are found by their format whatever the prefix: write fake
+  ones that do not follow it (`fake-github-token`), or the user allowlists them.
+
+How to recognise one: it sits in a test/mock/fixture/example/CI file or points to `localhost`, a local Docker
+service or `example.com`, and works nowhere but a developer's machine or a throwaway CI container. Anything
+used by a shared environment (staging, production, a SaaS account, a personal token) is real: mask it.
 
 ## Rules
 

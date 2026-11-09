@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -428,5 +429,41 @@ func TestBuiltinSecretRules(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Errorf("references, settings and placeholders flagged: %v", secrets(got))
+	}
+}
+
+// Values starting with fake- or fakesecret- (mocks, tests, examples, CI) are skipped by every rule, with
+// the built-in config, a project config extending it, and a config using gitleaks' deprecated [allowlist].
+func TestFakePrefixAllowlisted(t *testing.T) {
+	files := map[string]string{
+		".env": "DB_PASSWORD=fake-db-password\nAPI_TOKEN=fakesecret-token-123\n" +
+			"DATABASE_URL=postgres://app:fake-pw@localhost/app\nREAL_PASSWORD=Admin@123\n",
+		"app.go": `password := "fake-pass-for-tests"` + "\n",
+	}
+	for name, config := range map[string]string{
+		"built-in":   "",
+		"useDefault": "[extend]\nuseDefault = true\n",
+		"deprecated": "[allowlist]\npaths = ['''^vendor/''']\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := maps.Clone(files)
+			if config != "" {
+				f[".gitleaks.toml"] = config
+			}
+			got, err := Scan(context.Background(), Options{Root: tree(t, f)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if want := []string{".env=Admin@123"}; !reflect.DeepEqual(secrets(got), want) {
+				t.Errorf("Scan = %v, want %v", secrets(got), want)
+			}
+		})
+	}
+	set, err := Rules(t.TempDir(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.ContainsFunc(set.Allowlists, func(a AllowlistInfo) bool { return slices.Contains(a.Regexes, "^fake(?:secret)?-") }) {
+		t.Errorf("fake- allowlist not listed: %+v", set.Allowlists)
 	}
 }

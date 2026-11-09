@@ -64,7 +64,10 @@ unmasked secrets, stop, give the user the mask command it prints (it needs their
 see) and continue only once next_steps reports SAFE. When the task is done, check masking_status (missing: 0)
 and give the user the restore ("unseal") commands next_steps prints. When a finding may be a local-dev or test
 value rather than a real credential, call review_findings and let the user choose: mask, or allowlist it
-themselves. Never change __SECRET_MASK_<16 hex>__ placeholders; see masking_guide. Never run secret-mask reveal or ask the user for its output.
+themselves. Mock, test, example, CI and integration values you write must start with fake- (fake-db-password):
+those are never reported. MANDATORY: when the project (or a masked directory) has SECRET_MASK_AI_GUIDE.md, read
+that file in full before reading or editing any other file, and follow it for the whole task; masking_guide
+returns the same text. Never change __SECRET_MASK_<16 hex>__ placeholders. Never run secret-mask reveal or ask the user for its output.
 list_rules and get_rule show every detection rule in use; to detect a new kind of secret, try it with
 test_rule, then add it with add_rule (the only tool that writes: it appends a rule to .gitleaks.toml).`
 
@@ -129,7 +132,7 @@ func (a *App) mcp(ctx context.Context, args []string) error {
 			},
 			{
 				Name:        "masking_guide",
-				Description: "Rules for editing a masked project: which files contain placeholders and how they must be preserved.",
+				Description: "The content of SECRET_MASK_AI_GUIDE.md: rules for editing a masked project, which files contain placeholders and how they must be preserved. Read it (or the file) before touching any file of a masked project.",
 				InputSchema: pathSchema("masked directory, relative to the project root (default: the root)"),
 				Handler: func(ctx context.Context, raw json.RawMessage) (string, error) {
 					p, err := inRoot(root, raw)

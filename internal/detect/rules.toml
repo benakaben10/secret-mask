@@ -8,6 +8,13 @@
 #
 # Paths are matched relative to the project root, with forward slashes.
 
+# Global allowlist, added to every config: the one convention for fake values. A value written only for
+# examples, mocks, unit and integration tests or CI starts with "fake-" or "fakesecret-" (fake-db-password,
+# fakesecret-sk-test-123…) and is never reported, by any rule. Never give a real credential this prefix.
+[[allowlists]]
+description = "Fake values in examples, CI and tests: always start with fake- (or fakesecret-), never real credentials"
+regexes = ['''^fake(?:secret)?-''']
+
 # Shared skip list for values (kept identical in every rule below).
 # - $VAR ${VAR} $(cmd) %VAR% {{ tpl }} <placeholder> ***** xxxx ....
 # - true/false/null/none/nil/undefined/required/optional/changeme, and bare key words (password, secret, token…)

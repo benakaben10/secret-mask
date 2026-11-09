@@ -15,6 +15,9 @@ const DefaultName = "SECRET_MASK_AI_GUIDE.md"
 
 const rules = `# Secret masking — rules for AI assistants
 
+**Read this whole file before reading or editing any other file in this directory, and follow it for the
+entire task.**
+
 This directory was processed by ` + "`secret-mask`" + `. Secrets were replaced with placeholders like
 
     __SECRET_MASK_0123456789abcdef__
@@ -38,6 +41,13 @@ Restore only works if every placeholder is still present **exactly as written**.
 - Try to guess or reconstruct the original secrets.
 
 If a task seems to require changing a placeholder, stop and ask the user instead.
+
+## Mock, test, example, CI and integration values
+
+When you write a credential for a unit or integration test, a mock, an example, docs, CI or a local
+docker-compose, start it with ` + "`fake-`" + ` (` + "`fake-db-password`, `fake-api-key`" + `): secret-mask never reports
+nor masks those. Never use a real or real-looking credential there, and never copy a placeholder into a test.
+`+ "Values in a provider's format (`ghp_…`, `AKIA…`) are detected whatever the prefix: do not imitate them." + `
 
 ## Before you finish
 
