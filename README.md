@@ -98,7 +98,7 @@ secret-mask upgrade         # how to upgrade to a new release
 Step-by-step scenarios (sharing with an AI agent, CI, commits, recovery…): [demo/USE_CASES.md](demo/USE_CASES.md).
 
 The password comes from `$SECRET_MASK_PASSWORD` (or `--password-env NAME`); if it is empty you are prompted
-on the terminal. `--ask` always prompts. A new vault asks twice and needs at least 8 characters. Running
+on the terminal. `--ask` always prompts. `mask` asks twice (new vault: at least 8 characters); `restore` asks once. Running
 `mask` again adds new secrets to the same vault (same password).
 
 | Exit code | Meaning |

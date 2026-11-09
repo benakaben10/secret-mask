@@ -268,6 +268,13 @@ func TestPasswordSources(t *testing.T) {
 		if len(h.prompted) != 2 || h.prompted[1] {
 			t.Errorf("prompts = %v, want restore without confirm", h.prompted)
 		}
+		// Masking into the existing vault also asks twice.
+		if code := h.maskAll(); code != ExitOK {
+			t.Fatalf("re-mask exit %d: %s", code, h.stderr.String())
+		}
+		if len(h.prompted) != 3 || !h.prompted[2] {
+			t.Errorf("prompts = %v, want mask with confirm on an existing vault", h.prompted)
+		}
 	})
 	t.Run("--ask ignores env", func(t *testing.T) {
 		h := newHarness(t, files)

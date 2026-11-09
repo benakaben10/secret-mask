@@ -273,7 +273,7 @@ func (t *target) skip() map[string]bool {
 }
 
 // password returns the password: prompted with --ask, else from the environment, else prompted.
-// confirm asks twice (used when creating a vault).
+// confirm asks twice (used by mask). Restore asks once: a wrong password cannot open the vault.
 func (a *App) password(t *target, confirm bool) (string, error) {
 	if !t.ask {
 		if v := a.Getenv(t.passwordEnv); v != "" {
@@ -334,8 +334,9 @@ func (a *App) maskFindings(t *target, findings []detect.Finding, dryRun bool) (m
 	var pw string
 	switch {
 	case err == nil:
-		// Add to the existing vault; same password, same placeholders for known values.
-		if pw, err = a.password(t, false); err != nil {
+		// Add to the existing vault; same password, same placeholders for known values. Masking always
+		// asks twice: a typo is caught before the vault is even opened.
+		if pw, err = a.password(t, true); err != nil {
 			return nil, err
 		}
 		p, err := vault.Open(existing, pw)

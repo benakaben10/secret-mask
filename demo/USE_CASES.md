@@ -70,8 +70,8 @@ Restore:  secret-mask restore .
 
 - Every secret is replaced in place, e.g. `AWS_ACCESS_KEY_ID=__SECRET_MASK_8656926daa6d6f8c__`. The same value
   gets the same placeholder in every file.
-- The originals are encrypted in `.secret-mask.vault` (AES-256-GCM, key from your password). A new vault asks
-  for the password twice and needs at least 8 characters.
+- The originals are encrypted in `.secret-mask.vault` (AES-256-GCM, key from your password). `mask` always asks
+  for the password twice; a new vault needs at least 8 characters.
 - `SECRET_MASK_AI_GUIDE.md` tells AI agents to keep placeholders exactly as they are.
 - `--dry-run` shows what would be masked without writing anything.
 
