@@ -467,3 +467,42 @@ func TestFakePrefixAllowlisted(t *testing.T) {
 		t.Errorf("fake- allowlist not listed: %+v", set.Allowlists)
 	}
 }
+
+// Configuration-shaped values (paths, URLs without credentials, IPs, host:port, durations) under secret,
+// token and password keys are not secrets; credentials inside URLs and self-chosen values still are.
+func TestConfigShapedValuesSkipped(t *testing.T) {
+	skipped := "# kube_webhook_token_auth_url: https://...\n" +
+		"kube_webhook_token_auth_url: https://auth.example.internal/webhook\n" +
+		"oidc_token_endpoint: https://sso.example.com/realms/x/protocol/openid-connect/token\n" +
+		"vault_secret_path: /etc/vault/secret.json\n" +
+		"client_secret_file: ./certs/client.pem\n" +
+		"db_password_file: /run/secrets/db_password\n" +
+		"token_server: 10.0.0.12:8200\n" +
+		"secret_backend: vault.service.consul:8200\n" +
+		"auth_token_cidr: 10.0.0.0/8\n" +
+		"token_refresh: 30m\n" +
+		"password_reset_url: https://app.example.com/reset\n"
+	found := "CLIENT_SECRET: mysecret1\n" +
+		"# api_token: Admin@123\n" +
+		"token: https://hooks.example.com/x?key=abc123\n" +
+		"admin_password: Pa55word!\n"
+	got, err := Scan(context.Background(), Options{Root: tree(t, map[string]string{"group_vars/all.yml": skipped + found})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"group_vars/all.yml=Admin@123", "group_vars/all.yml=Pa55word!",
+		"group_vars/all.yml=https://hooks.example.com/x?key=abc123", "group_vars/all.yml=mysecret1",
+	}
+	if !reflect.DeepEqual(secrets(got), want) {
+		t.Errorf("Scan = %v, want %v", secrets(got), want)
+	}
+	quoted := `{"tokenUrl": "https://sso.example.com/token", "secretPath": "/etc/app/secret", "apiKey": "k3y-Value_42"}` + "\n"
+	got, err = Scan(context.Background(), Options{Root: tree(t, map[string]string{"app.json": quoted})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"app.json=k3y-Value_42"}; !reflect.DeepEqual(secrets(got), want) {
+		t.Errorf("quoted: Scan = %v, want %v", secrets(got), want)
+	}
+}

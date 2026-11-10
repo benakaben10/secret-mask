@@ -163,7 +163,9 @@ Every scan (`check`, `mask`, the agent hooks, the MCP server, `pre-commit`) uses
    people choose themselves (`Admin@123`, `CLIENT_SECRET=mysecret1`), which have too little entropy for
    gitleaks, and a few formats it misses. They are strict on purpose (a value in `.env.example` is caught too);
    only obvious non-values are skipped: `$VAR`, `${VAR}`, `$(cmd)`, `{{ template }}`, `<placeholder>`, `***`,
-   `xxxx`, `true`/`null`, `changeme`, numbers for token settings, and keys that name a reference or a setting
+   `xxxx`, `true`/`null`, `changeme`, numbers and durations for token settings, values shaped like configuration
+   (file paths `/etc/ssl/ca.pem`, URLs without `user:pass@` or `?query`, IPs, `host.domain:port`), and keys that
+   name a reference or a setting
    (`secretName`, `existingSecret`, `secretKeyRef`, `tokenTtl`, `token_expiry`, `keyFile`, `publicKey`,
    `password_length`…).
 

@@ -4,7 +4,10 @@
 # They catch secrets people choose themselves (Admin@123, hunter2, a hand-made token…) that have too little
 # entropy for the gitleaks rules, which look for random tokens, plus a few formats the gitleaks rules miss.
 # They are strict on purpose: a sample value in .env.example is masked too. Only obvious non-values are
-# skipped: variable references, templates, <placeholders>, ***, booleans, changeme.
+# skipped: variable references, templates, <placeholders>, ***, booleans, changeme, and values shaped like
+# configuration (file paths, URLs without user:pass@ or query string, IPs, host:port, and for secret/token
+# keys durations). A URL that carries credentials is still found (secret-mask-url-password
+# for user:pass@, these rules for ?key=…).
 #
 # Paths are matched relative to the project root, with forward slashes.
 
@@ -18,6 +21,8 @@ regexes = ['''^fake(?:secret)?-''']
 # Shared skip list for values (kept identical in every rule below).
 # - $VAR ${VAR} $(cmd) %VAR% {{ tpl }} <placeholder> ***** xxxx ....
 # - true/false/null/none/nil/undefined/required/optional/changeme, and bare key words (password, secret, token…)
+# - configuration-shaped values: /file/path, scheme://host/path (no user:pass@, ?query or #fragment), IP[:port][/cidr],
+#   host.domain:port; secret/token rules also skip durations (30m, 24h)
 
 [[rules]]
 id = "secret-mask-password-quoted"
@@ -29,6 +34,10 @@ tags = ["password", "secret-mask"]
 regexes = [
   '''^(?:\$\{?[\w.:-]*\}?|\$\(.*|%[\w.]+%|\{\{.*\}\}|<[^<>]*>|\*+|x{3,}|X{3,}|\.{3,}|-+)$''',
   '''^(?i:true|false|null|none|nil|undefined|required|optional|changeme|password|passwd|pass|secret|token|key|api[_-]?key|credentials?)$''',
+  '''^(?:~|\.{1,2})?/[\w.@+-]+(?:/[\w.@+-]*)*$''',                  # file path: /etc/ssl/ca.pem, ./certs/key.pem
+  '''^[a-zA-Z][a-zA-Z0-9+.-]*://[^@?#\s]*$''',                      # URL without user:pass@, query or fragment
+  '''^(?:\d{1,3}\.){3}\d{1,3}(?::\d{1,5})?(?:/\d{1,2})?$''',          # IP, IP:port, CIDR
+  '''^[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)+:\d{1,5}$''',                 # host.domain:port
   '''\s''',
 ]
 
@@ -43,6 +52,10 @@ tags = ["password", "secret-mask"]
 regexes = [
   '''^(?:\$\{?[\w.:-]*\}?|\$\(.*|%[\w.]+%|\{\{.*\}\}|<[^<>]*>|\*+|x{3,}|X{3,}|\.{3,}|-+)$''',
   '''^(?i:true|false|null|none|nil|undefined|required|optional|changeme|password|passwd|pass|secret|token|key|api[_-]?key|credentials?)$''',
+  '''^(?:~|\.{1,2})?/[\w.@+-]+(?:/[\w.@+-]*)*$''',                  # file path: /etc/ssl/ca.pem, ./certs/key.pem
+  '''^[a-zA-Z][a-zA-Z0-9+.-]*://[^@?#\s]*$''',                      # URL without user:pass@, query or fragment
+  '''^(?:\d{1,3}\.){3}\d{1,3}(?::\d{1,5})?(?:/\d{1,2})?$''',          # IP, IP:port, CIDR
+  '''^[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)+:\d{1,5}$''',                 # host.domain:port
   '''^[|>][-+]?$''',
 ]
 
@@ -95,6 +108,11 @@ tags = ["secret", "secret-mask"]
 regexes = [
   '''^(?:\$\{?[\w.:-]*\}?|\$\(.*|%[\w.]+%|\{\{.*\}\}|<[^<>]*>|\*+|x{3,}|X{3,}|\.{3,}|-+)$''',
   '''^(?i:true|false|null|none|nil|undefined|required|optional|changeme|password|passwd|pass|secret|token|key|api[_-]?key|credentials?)$''',
+  '''^(?:~|\.{1,2})?/[\w.@+-]+(?:/[\w.@+-]*)*$''',                  # file path: /etc/ssl/ca.pem, ./certs/key.pem
+  '''^[a-zA-Z][a-zA-Z0-9+.-]*://[^@?#\s]*$''',                      # URL without user:pass@, query or fragment
+  '''^(?:\d{1,3}\.){3}\d{1,3}(?::\d{1,5})?(?:/\d{1,2})?$''',          # IP, IP:port, CIDR
+  '''^[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)+:\d{1,5}$''',                 # host.domain:port
+  '''^\d+(?:\.\d+)?(?:ns|us|ms|s|m|h|d|w|y)$''',                     # duration: 30m, 1500ms, 24h
   '''^\d+$''',
   '''\s''',
 ]
@@ -114,6 +132,11 @@ tags = ["secret", "secret-mask"]
 regexes = [
   '''^(?:\$\{?[\w.:-]*\}?|\$\(.*|%[\w.]+%|\{\{.*\}\}|<[^<>]*>|\*+|x{3,}|X{3,}|\.{3,}|-+)$''',
   '''^(?i:true|false|null|none|nil|undefined|required|optional|changeme|password|passwd|pass|secret|token|key|api[_-]?key|credentials?)$''',
+  '''^(?:~|\.{1,2})?/[\w.@+-]+(?:/[\w.@+-]*)*$''',                  # file path: /etc/ssl/ca.pem, ./certs/key.pem
+  '''^[a-zA-Z][a-zA-Z0-9+.-]*://[^@?#\s]*$''',                      # URL without user:pass@, query or fragment
+  '''^(?:\d{1,3}\.){3}\d{1,3}(?::\d{1,5})?(?:/\d{1,2})?$''',          # IP, IP:port, CIDR
+  '''^[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)+:\d{1,5}$''',                 # host.domain:port
+  '''^\d+(?:\.\d+)?(?:ns|us|ms|s|m|h|d|w|y)$''',                     # duration: 30m, 1500ms, 24h
   '''^\d+[a-z]{0,2}$''',
   '''^[|>][-+]?$''',
 ]
